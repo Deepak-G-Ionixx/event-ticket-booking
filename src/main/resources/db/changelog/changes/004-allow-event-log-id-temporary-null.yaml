@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 4
+      author: eventticketbooking
+      comment: Allow the application to obtain the generated event ID before assigning ETB-formatted event_log_id.
+      changes:
+        - dropNotNullConstraint:
+            tableName: event
+            columnName: event_log_id
+            columnDataType: VARCHAR(32)

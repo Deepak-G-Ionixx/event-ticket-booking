@@ -1,0 +1,30 @@
+
+databaseChangeLog:
+  - changeSet:
+      id: 3
+      author: eventticketbooking
+      comment: Add a unique event log ID to each event.
+      changes:
+        - addColumn:
+            tableName: event
+            columns:
+              - column:
+                  name: event_log_id
+                  type: VARCHAR(32)
+
+        - sql:
+            dbms: postgresql
+            sql: |
+              UPDATE event
+              SET event_log_id = 'ETB' || LPAD(id::text, 4, '0')
+              WHERE event_log_id IS NULL;
+
+        - addNotNullConstraint:
+            tableName: event
+            columnName: event_log_id
+            columnDataType: VARCHAR(32)
+
+        - addUniqueConstraint:
+            tableName: event
+            columnNames: event_log_id
+            constraintName: uk_event_event_log_id

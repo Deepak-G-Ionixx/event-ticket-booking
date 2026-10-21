@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: event-ticket-postgres
+    environment:
+      POSTGRES_DB: eventticketdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: welcome
+      TZ: Asia/Kolkata
+      PGTZ: Asia/Kolkata
+    ports:
+      - "5433:5432"
+    # Keep the original mount path to remain compatible with the user's existing volume.
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventticketdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

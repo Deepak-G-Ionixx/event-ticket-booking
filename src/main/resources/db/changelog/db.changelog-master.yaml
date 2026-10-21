@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: eventticketbooking
+      comment: Original no-op migration retained for existing databases.
+      changes:
+        - sql:
+            sql: SELECT 1
+  - include:
+      file: db/changelog/changes/002-create-event-table.yaml
+  - include:
+      file: db/changelog/changes/003-add-event-log-id.yaml
+  - include:
+      file: db/changelog/changes/004-allow-event-log-id-temporary-null.yaml

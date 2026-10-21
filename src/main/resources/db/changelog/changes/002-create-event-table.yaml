@@ -1,0 +1,68 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-event-table
+      author: eventticketbooking
+      changes:
+        - createTable:
+            tableName: event
+            columns:
+              - column:
+                  name: id
+                  type: INTEGER
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_event
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: venue
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: category
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: event_date
+                  type: DATE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_seats
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+              - column:
+                  name: base_price
+                  type: NUMERIC(12,2)
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: event
+            columnNames: name, event_date
+            constraintName: uk_event_name_event_date
+        - sql:
+            dbms: postgresql
+            sql: >
+              ALTER TABLE event
+              ADD CONSTRAINT ck_event_category
+              CHECK (category IN ('MUSIC', 'SPORTS', 'TECH', 'THEATRE'))
+        - sql:
+            dbms: postgresql
+            sql: >
+              ALTER TABLE event
+              ADD CONSTRAINT ck_event_total_seats
+              CHECK (total_seats BETWEEN 10 AND 10000)
+        - sql:
+            dbms: postgresql
+            sql: >
+              ALTER TABLE event
+              ADD CONSTRAINT ck_event_base_price
+              CHECK (base_price > 0)
