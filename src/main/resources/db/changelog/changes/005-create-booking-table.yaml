@@ -1,0 +1,110 @@
+
+databaseChangeLog:
+  - changeSet:
+      id: 005-create-booking-table
+      author: eventticketbooking
+      changes:
+        - createTable:
+            tableName: booking
+            columns:
+              - column:
+                  name: id
+                  type: INT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_booking
+                    nullable: false
+
+              - column:
+                  name: event_id
+                  type: INT
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: customer_name
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: customer_email
+                  type: VARCHAR(254)
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: seat_numbers
+                  type: VARCHAR(35)
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: seats
+                  type: INT
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: price_per_seat
+                  type: NUMERIC(12,2)
+
+              - column:
+                  name: total_amount
+                  type: NUMERIC(12,2)
+
+              - column:
+                  name: status
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: rejection_reason
+                  type: VARCHAR(500)
+
+              - column:
+                  name: booked_on
+                  type: DATE
+                  constraints:
+                    nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: booking
+            baseColumnNames: event_id
+            referencedTableName: event
+            referencedColumnNames: id
+            constraintName: fk_booking_event
+
+        - sql:
+            sql: >
+              ALTER TABLE booking
+              ADD CONSTRAINT chk_booking_seats
+              CHECK (seats BETWEEN 1 AND 6)
+
+        - sql:
+            sql: >
+              ALTER TABLE booking
+              ADD CONSTRAINT chk_booking_status
+              CHECK (status IN ('CONFIRMED', 'REJECTED'))
+
+        - createIndex:
+            tableName: booking
+            indexName: idx_booking_event_status
+            columns:
+              - column:
+                  name: event_id
+              - column:
+                  name: status
+
+        - createIndex:
+            tableName: booking
+            indexName: idx_booking_event_email_status
+            columns:
+              - column:
+                  name: event_id
+              - column:
+                  name: customer_email
+              - column:
+                  name: status
