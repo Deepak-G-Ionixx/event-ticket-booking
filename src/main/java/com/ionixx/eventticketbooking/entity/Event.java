@@ -20,11 +20,11 @@ import jakarta.persistence.Table;
                 @UniqueConstraint(
                         name = "uk_event_name_event_date",
                         columnNames = {"name", "event_date"}
-                ),
+                ),//This means the combination of name and event_date must be unique.
                 @UniqueConstraint(
                         name = "uk_event_event_log_id",
                         columnNames = {"event_log_id"}
-                )
+                )//event_log_id value must be unique across the table.
         }
 )
 public class Event {

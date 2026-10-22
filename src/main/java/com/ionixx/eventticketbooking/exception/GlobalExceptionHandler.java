@@ -4,8 +4,6 @@ package com.ionixx.eventticketbooking.exception;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,18 +28,19 @@ public class GlobalExceptionHandler {
 
     private final HttpServletRequest httpServletRequest;
 
-    public GlobalExceptionHandler(HttpServletRequest httpServletRequest) {
+    public GlobalExceptionHandler(
+            HttpServletRequest httpServletRequest) {
         this.httpServletRequest = httpServletRequest;
     }
 
+    // Handles @Valid request DTO validation failures.
     @ExceptionHandler(MethodArgumentNotValidException.class)
-
-    private ResponseEntity<ApiErrorResponse> handleValidationErrors(
-            MethodArgumentNotValidException ex) {
+    public ResponseEntity<ApiErrorResponse> handleValidationErrors(
+            MethodArgumentNotValidException exception) {
 
         List<ApiErrorResponse.FieldError> errors = new ArrayList<>();
 
-        ex.getBindingResult().getFieldErrors().forEach(error ->
+        exception.getBindingResult().getFieldErrors().forEach(error ->
                 errors.add(new ApiErrorResponse.FieldError(
                         error.getField(),
                         error.getRejectedValue(),
@@ -49,7 +48,7 @@ public class GlobalExceptionHandler {
                 ))
         );
 
-        ex.getBindingResult().getGlobalErrors().forEach(error ->
+        exception.getBindingResult().getGlobalErrors().forEach(error ->
                 errors.add(new ApiErrorResponse.FieldError(
                         error.getObjectName(),
                         null,
@@ -65,7 +64,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-
+    // Handles malformed JSON and invalid JSON values.
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiErrorResponse> handleUnreadableBody(
             HttpMessageNotReadableException exception) {
@@ -78,6 +77,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Existing event handlers.
     @ExceptionHandler(InvalidEventIdException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidEventId(
             InvalidEventIdException exception) {
@@ -114,6 +114,75 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Booking ID is not numeric or is less than or equal to zero.
+    @ExceptionHandler(InvalidBookingIdException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidBookingId(
+            InvalidBookingIdException exception) {
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_BOOKING_ID",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
+    // The requested booking does not exist.
+    @ExceptionHandler(BookingNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleBookingNotFound(
+            BookingNotFoundException exception) {
+
+        return buildResponse(
+                HttpStatus.NOT_FOUND,
+                "BOOKING_NOT_FOUND",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
+    // Business validation failures, such as duplicate seat numbers.
+    @ExceptionHandler(InvalidBookingRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidBookingRequest(
+            InvalidBookingRequestException exception) {
+
+        List<ApiErrorResponse.FieldError> errors = List.of(
+                new ApiErrorResponse.FieldError(
+                        exception.getField(),
+                        null,
+                        exception.getMessage()
+                )
+        );
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_BOOKING_REQUEST",
+                "Booking request is invalid",
+                errors
+        );
+    }
+
+    // A seat number is larger than the event's total_seats.
+    @ExceptionHandler(SeatOutOfRangeException.class)
+    public ResponseEntity<ApiErrorResponse> handleSeatOutOfRange(
+            SeatOutOfRangeException exception) {
+
+        List<ApiErrorResponse.FieldError> errors = List.of(
+                new ApiErrorResponse.FieldError(
+                        "seat_numbers",
+                        exception.getSeatNumber(),
+                        exception.getMessage()
+                )
+        );
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "SEAT_OUT_OF_RANGE",
+                exception.getMessage(),
+                errors
+        );
+    }
+
+    // Preserves the existing handling of other bad arguments.
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
             IllegalArgumentException exception) {
@@ -126,6 +195,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Catch-all: logs the real exception but avoids exposing internals.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception exception) {
@@ -144,6 +214,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Builds the consistent API error response used throughout the app.
     private ResponseEntity<ApiErrorResponse> buildResponse(
             HttpStatus status,
             String code,
@@ -174,8 +245,11 @@ public class GlobalExceptionHandler {
             return requestId;
         }
 
-        return (String) httpServletRequest.getAttribute(
-                RequestIdFilter.MDC_KEY
-        );
+        Object requestAttribute =
+                httpServletRequest.getAttribute(RequestIdFilter.MDC_KEY);
+
+        return requestAttribute == null
+                ? null
+                : requestAttribute.toString();
     }
 }

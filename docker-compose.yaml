@@ -15,9 +15,9 @@ services:
       - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d eventticketdb"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 5s  #every 5s it will start actuator check
+      timeout: 5s   #every 5s it will stop  actuator check
+      retries: 10  #every 10s we will telling that health is not good to actuator
 
 volumes:
   postgres_data:
