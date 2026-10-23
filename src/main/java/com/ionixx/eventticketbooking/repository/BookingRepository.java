@@ -10,10 +10,16 @@ import org.springframework.data.repository.query.Param;
 import com.ionixx.eventticketbooking.entity.Booking;
 import com.ionixx.eventticketbooking.entity.BookingStatus;
 
-public interface BookingRepository
-        extends JpaRepository<Booking, Integer> {
+public interface BookingRepository extends JpaRepository<Booking, Integer> {
 
     List<Booking> findAllByEvent_IdAndStatus(
+            Integer eventId,
+            BookingStatus status);
+
+    List<Booking> findAllByEvent_IdOrderByBookedOnDescIdDesc(
+            Integer eventId);
+
+    List<Booking> findAllByEvent_IdAndStatusOrderByBookedOnDescIdDesc(
             Integer eventId,
             BookingStatus status);
 

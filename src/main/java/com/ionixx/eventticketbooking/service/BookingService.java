@@ -1,9 +1,9 @@
-
 package com.ionixx.eventticketbooking.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.ionixx.eventticketbooking.dto.BookingResponse;
 import com.ionixx.eventticketbooking.dto.CreateBookingRequest;
+import com.ionixx.eventticketbooking.dto.EventSeatMapResponse;
+import com.ionixx.eventticketbooking.dto.EventSummaryResponse;
 import com.ionixx.eventticketbooking.entity.Booking;
 import com.ionixx.eventticketbooking.entity.BookingStatus;
 import com.ionixx.eventticketbooking.entity.Event;
@@ -42,10 +44,12 @@ public class BookingService {
     public BookingService(
             BookingRepository bookingRepository,
             EventRepository eventRepository) {
+
         this.bookingRepository = bookingRepository;
         this.eventRepository = eventRepository;
     }
 
+    // Existing POST /api/bookings business logic.
     @Transactional
     public BookingResponse createBooking(CreateBookingRequest request) {
 
@@ -55,7 +59,6 @@ public class BookingService {
                 .orElseThrow(() ->
                         new EventNotFoundException(request.eventId()));
 
-        // Every requested seat must exist for the event.
         for (Integer seatNumber : request.seatNumbers()) {
             if (seatNumber > event.getTotalSeats()) {
                 throw new SeatOutOfRangeException(seatNumber);
@@ -103,11 +106,10 @@ public class BookingService {
             booking.reject(rejectionReason);
         }
 
-        Booking savedBooking = bookingRepository.save(booking);
-
-        return toResponse(savedBooking);
+        return toResponse(bookingRepository.save(booking));
     }
 
+    // Existing GET /api/bookings/{id}.
     @Transactional(readOnly = true)
     public BookingResponse getBookingById(Integer id) {
 
@@ -116,6 +118,130 @@ public class BookingService {
                 .orElseThrow(() -> new BookingNotFoundException(id));
 
         return toResponse(booking);
+    }
+
+    // GET /api/events/{id}/bookings?status=CONFIRMED
+    @Transactional(readOnly = true)
+    public List<BookingResponse> getEventBookings(
+            Integer eventId,
+            BookingStatus status) {
+
+        ensureEventExists(eventId);
+
+        List<Booking> bookings;
+
+        if (status == null) {
+            bookings = bookingRepository
+                    .findAllByEvent_IdOrderByBookedOnDescIdDesc(eventId);
+        } else {
+            bookings = bookingRepository
+                    .findAllByEvent_IdAndStatusOrderByBookedOnDescIdDesc(
+                            eventId,
+                            status);
+        }
+
+        return bookings.stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    // GET /api/events/{id}/seats
+    @Transactional(readOnly = true)
+    public EventSeatMapResponse getEventSeatMap(Integer eventId) {
+
+        Event event = ensureEventExists(eventId);
+
+        List<Booking> confirmedBookings =
+                bookingRepository.findAllByEvent_IdAndStatus(
+                        eventId,
+                        BookingStatus.CONFIRMED);
+
+        Set<Integer> bookedSeats = new TreeSet<>();
+
+        for (Booking booking : confirmedBookings) {
+            bookedSeats.addAll(
+                    parseSeatNumbers(booking.getSeatNumbers()));
+        }
+
+        List<Integer> availableSeats = new ArrayList<>();
+
+        for (int seat = 1; seat <= event.getTotalSeats(); seat++) {
+            if (!bookedSeats.contains(seat)) {
+                availableSeats.add(seat);
+            }
+        }
+
+        return new EventSeatMapResponse(
+                event.getId(),
+                event.getTotalSeats(),
+                List.copyOf(bookedSeats),
+                availableSeats);
+    }
+
+    // GET /api/events/{id}/summary
+    @Transactional(readOnly = true)
+    public EventSummaryResponse getEventSummary(Integer eventId) {
+
+        Event event = ensureEventExists(eventId);
+
+        List<Booking> confirmedBookings =
+                bookingRepository.findAllByEvent_IdAndStatus(
+                        eventId,
+                        BookingStatus.CONFIRMED);
+
+        List<Booking> rejectedBookings =
+                bookingRepository.findAllByEvent_IdAndStatus(
+                        eventId,
+                        BookingStatus.REJECTED);
+
+        int seatsSold = confirmedBookings.stream()
+                .mapToInt(Booking::getSeats)
+                .sum();
+
+        BigDecimal totalRevenue = confirmedBookings.stream()
+                .map(Booking::getTotalAmount)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal exactOccupancy = BigDecimal.valueOf(seatsSold)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(
+                        BigDecimal.valueOf(event.getTotalSeats()),
+                        6,
+                        RoundingMode.HALF_UP);
+
+        BigDecimal occupancyPct = exactOccupancy.setScale(
+                1,
+                RoundingMode.HALF_UP);
+
+        String demandBand;
+
+        if (exactOccupancy.compareTo(new BigDecimal("40")) < 0) {
+            demandBand = "LOW";
+        } else if (exactOccupancy.compareTo(new BigDecimal("75")) <= 0) {
+            demandBand = "MEDIUM";
+        } else {
+            demandBand = "HIGH";
+        }
+
+        return new EventSummaryResponse(
+                event.getId(),
+                event.getName(),
+                event.getTotalSeats(),
+                seatsSold,
+                event.getTotalSeats() - seatsSold,
+                confirmedBookings.size(),
+                rejectedBookings.size(),
+                totalRevenue,
+                occupancyPct,
+                demandBand);
+    }
+
+    private Event ensureEventExists(Integer eventId) {
+        return eventRepository.findById(eventId)
+                .orElseThrow(() ->
+                        new EventNotFoundException(eventId));
     }
 
     private void validateSeatNumbers(List<Integer> seatNumbers) {
@@ -154,12 +280,10 @@ public class BookingService {
             List<Integer> requestedSeats,
             LocalDate today) {
 
-        // Rule 1: Reject bookings for events that have already ended.
         if (event.getEventDate().isBefore(today)) {
             return "Event is already over";
         }
 
-        // Rule 2: Reject if any requested seat is already confirmed.
         List<Booking> confirmedBookings =
                 bookingRepository.findAllByEvent_IdAndStatus(
                         event.getId(),
@@ -185,8 +309,6 @@ public class BookingService {
             return "Seats already booked: " + conflictList;
         }
 
-        // Rule 3: One customer can hold at most six confirmed seats
-        // for this event across all their bookings.
         Long existingSeats =
                 bookingRepository.countConfirmedSeatsForCustomer(
                         event.getId(),
@@ -211,12 +333,10 @@ public class BookingService {
 
         BigDecimal price = event.getBasePrice();
 
-        // Discount 1: 10% off when booking at least 30 days in advance.
         if (!event.getEventDate().isBefore(today.plusDays(30))) {
             price = price.multiply(EARLY_BIRD_MULTIPLIER);
         }
 
-        // Discount 2: Additional 5% off for 4 or more seats.
         if (seatCount >= 4) {
             price = price.multiply(GROUP_MULTIPLIER);
         }
@@ -225,6 +345,7 @@ public class BookingService {
     }
 
     private List<Integer> parseSeatNumbers(String seatNumbers) {
+
         if (seatNumbers == null || seatNumbers.isBlank()) {
             return List.of();
         }
@@ -236,6 +357,7 @@ public class BookingService {
     }
 
     private BookingResponse toResponse(Booking booking) {
+
         return new BookingResponse(
                 booking.getId(),
                 booking.getEvent().getId(),

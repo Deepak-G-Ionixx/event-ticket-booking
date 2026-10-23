@@ -33,7 +33,6 @@ public class Booking {
     @Column(name = "customer_email", nullable = false, length = 254)
     private String customerEmail;
 
-    // Comma-separated storage, for example "12,13,14,15".
     @Column(name = "seat_numbers", nullable = false, length = 35)
     private String seatNumbers;
 
@@ -57,7 +56,7 @@ public class Booking {
     private LocalDate bookedOn;
 
     protected Booking() {
-        // JPA requires a no-argument constructor.
+        // Required by JPA.
     }
 
     public Booking(
@@ -69,6 +68,7 @@ public class Booking {
             BookingStatus status,
             String rejectionReason,
             LocalDate bookedOn) {
+
         this.event = event;
         this.customerName = customerName;
         this.customerEmail = customerEmail;
@@ -82,6 +82,7 @@ public class Booking {
     public void confirm(
             BigDecimal pricePerSeat,
             BigDecimal totalAmount) {
+
         this.status = BookingStatus.CONFIRMED;
         this.pricePerSeat = pricePerSeat;
         this.totalAmount = totalAmount;
