@@ -1,151 +1,351 @@
-# Event Ticket Booking
+# Event Ticket Booking Service
 
-Spring Boot REST API for creating and retrieving events. The project folder name remains `eventTicketBooking`.
+A Spring Boot REST API for managing events, booking seats, tracking seat availability, and viewing event summaries.
 
-## Technology stack
+## 1. Technologies Used
 
 - Java 21
-- Spring Boot 4.1.1
-- Gradle
-- Spring MVC REST API
-- Spring Data JPA / Hibernate
-- PostgreSQL 16 using Docker Compose
-- Liquibase database migrations
+- Spring Boot
+- Gradle (Kotlin DSL)
+- Spring Web
+- Spring Data JPA
 - Jakarta Bean Validation
+- PostgreSQL
+- Liquibase
 - Spring Boot Actuator
+- JUnit and Spring Boot Test
+- Testcontainers
+- Docker and Docker Compose
 
-## Folder layout
+## 2. Prerequisites
+
+Install the following before running the application:
+
+- Java 21
+- Docker Desktop
+- Git
+- IntelliJ IDEA (recommended)
+- Postman (for API testing)
+- DBeaver (optional, for viewing database tables)
+
+Verify Java installation:
+
+```powershell
+java -version
+```
+
+Verify Docker is running:
+
+```powershell
+docker --version
+docker compose version
+```
+
+## 3. Clone the Repository
+
+```powershell
+git clone https://github.com/Deepak-G-Ionixx/event-ticket-booking.git
+cd event-ticket-booking
+```
+
+Make sure you are in the directory containing `build.gradle.kts`, `settings.gradle.kts`, and `gradlew.bat`.
+
+## 4. Database Setup
+
+This application uses PostgreSQL as its relational database.
+
+### Step 1: Configure Docker Compose
+
+Ensure your `docker-compose.yml` file is in the project root.
+
+The following is an example configuration for a local development database:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    container_name: event-ticket-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eventticketdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TZ: Asia/Kolkata
+      PGTZ: Asia/Kolkata
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventticketdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+```
+
+If you already have a working Compose file, keep your existing configuration and use the correct port in the application properties. Do not create a second PostgreSQL container unnecessarily.
+
+### Step 2: Start PostgreSQL
+
+Run from the directory containing `docker-compose.yml`:
+
+```powershell
+docker compose up -d
+```
+
+Check the container:
+
+```powershell
+docker compose ps
+```
+
+View PostgreSQL logs if needed:
+
+```powershell
+docker compose logs postgres
+```
+
+### Step 3: Configure the application
+
+In `src/main/resources/application.properties`, configure the datasource to match your Docker Compose settings.
+
+For the example above:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5433/eventticketdb
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.show-sql=true
+
+spring.liquibase.enabled=true
+
+management.endpoints.web.exposure.include=health
+management.endpoint.health.show-details=always
+```
+
+**Important:** These are example local-development credentials. Do not use real production credentials in source control. If your Compose file maps `5432:5432` instead, use port `5432` in the JDBC URL.
+
+### Step 4: Database migrations
+
+Liquibase manages the database schema through changelog files under:
 
 ```text
-eventTicketBooking/
-├── build.gradle
-├── docker-compose.yaml
-├── gradlew
-├── gradlew.bat
-├── settings.gradle
-└── src/
-    ├── main/
-    │   ├── java/com/ionixx/eventticketbooking/
-    │   │   ├── EventTicketBookingApplication.java
-    │   │   ├── controller/EventController.java
-    │   │   ├── dto/
-    │   │   ├── entity/
-    │   │   ├── exception/
-    │   │   ├── repository/EventRepository.java
-    │   │   └── service/EventService.java
-    │   └── resources/
-    │       ├── application.properties
-    │       └── db/changelog/
-    └── test/
+src/main/resources/db/changelog/
 ```
 
-## Run on Windows
+The master changelog is:
 
-Open PowerShell in the `eventTicketBooking` folder.
+```text
+src/main/resources/db/changelog/db.changelog-master.yaml
+```
 
-1. Start PostgreSQL:
+When the application starts, Liquibase executes the configured migrations and creates or updates the database schema.
 
-   ```powershell
-   docker compose up -d
-   docker compose ps
-   ```
+Hibernate uses `spring.jpa.hibernate.ddl-auto=validate` to validate the entity mappings against the database schema; it does not create the tables.
 
-2. Run tests:
+## 5. Run the Application
 
-   ```powershell
-   .\gradlew.bat clean test
-   ```
+On Windows PowerShell, execute:
 
-3. Start Spring Boot:
+```powershell
+.\gradlew.bat bootRun
+```
 
-   ```powershell
-   .\gradlew.bat bootRun
-   ```
+The application will normally start at:
 
-4. Check health:
+```text
+http://localhost:8080
+```
 
-   `http://localhost:8080/actuator/health`
+The root URL `/` may return `404 Not Found` if no root endpoint is implemented. Use the API endpoints documented below instead.
 
-PostgreSQL is exposed on host port `5433` and container port `5432`, matching `application.properties`.
+## 6. Health Check
 
-## API: create an event
+After the application starts, open:
 
-`POST http://localhost:8080/api/events`
+```text
+http://localhost:8080/actuator/health
+```
 
-Header: `Content-Type: application/json`
+A healthy application typically returns:
 
 ```json
 {
-  "name": "Java Conference",
+  "status": "UP"
+}
+```
+
+## 7. API Endpoints
+
+### Events
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/events` | Create an event |
+| GET | `/api/events/{id}` | Retrieve an event by ID |
+
+Example event request:
+
+```json
+{
+  "name": "Chennai Tech Conference",
   "venue": "Chennai Trade Centre",
   "category": "TECH",
-  "eventDate": "2026-11-15",
-  "totalSeats": 500,
-  "basePrice": 1499.00
+  "eventDate": "2027-01-15",
+  "totalSeats": 200,
+  "basePrice": 1500.00
 }
 ```
 
-A successful request returns `201 Created`, a `Location` header such as `/api/events/1`, and the saved event body. Use a date later than today's date.
+Valid event categories:
 
-Allowed categories: `MUSIC`, `SPORTS`, `TECH`, `THEATRE`.
+- `MUSIC`
+- `SPORTS`
+- `TECH`
+- `THEATRE`
 
-## API: retrieve an event
+### Bookings
 
-`GET http://localhost:8080/api/events/1`
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/bookings` | Create a booking |
+| GET | `/api/bookings/{id}` | Retrieve a booking by ID |
 
-- `200 OK`: event exists
-- `400 Bad Request`: ID is not a positive integer
-- `404 Not Found`: positive ID does not exist
-
-## Validation and duplicate rules
-
-- Name and venue: required, 3–100 characters
-- Category: required, one of the four enum values
-- Event date: required and in the future
-- Total seats: 10–10,000
-- Base price: greater than zero, maximum 2 decimal places
-- `(name, event_date)` must be unique
-- Database constraints back up key validation rules; Liquibase manages the schema
-- Hibernate is configured with `ddl-auto=validate`, not `update` or `create`
-
-## Error response example
+Example booking request:
 
 ```json
 {
-  "timestamp": "2026-10-20T04:30:00Z",
-  "status": 409,
-  "error": "DUPLICATE_EVENT",
-  "message": "An event with the same name and date already exists",
-  "fieldErrors": {}
+  "event_id": 1,
+  "customer_name": "Priya Kumar",
+  "customer_email": "priya@example.com",
+  "seat_numbers": [1, 2]
 }
 ```
 
-## Database notes
+Replace the event ID with an existing event ID.
 
-The original no-op Liquibase changeset is retained so databases that have already recorded it are not broken. A new changeset creates the `event` table. Never edit a Liquibase changeset that has already been applied to a shared database; add a new changeset instead.
+### Event bookings, seats and summary
 
-The local database credentials are configured as `postgres` / `welcome` for development. Override them with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` environment variables when needed.
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/events/{id}/bookings` | List bookings for an event |
+| GET | `/api/events/{id}/bookings?status=CONFIRMED` | Filter bookings by status |
+| GET | `/api/events/{id}/seats` | View booked and available seats |
+| GET | `/api/events/{id}/summary` | View event statistics and revenue |
 
+Supported booking status filters are `CONFIRMED` and `REJECTED`.
 
-## Application logging
+## 8. Run Tests
 
-- Active structured JSON log file: `logs/event-ticket-booking.json` (relative to the directory from which the application is started).
-- Rotated/compressed files: `logs/archive/` (up to 30 days, 10 MB per file, total archive cap 1 GB).
-- Logs are also printed to the IntelliJ console.
-- Each HTTP request receives an `X-Request-Id` if the caller did not provide a valid one. Successful event create/get operations add `eventLogId` to their log entries and the HTTP completion entry.
-- Event log IDs use the database-generated event ID: `ETB%04d`, so ID 1 becomes `ETB0001`, ID 13 becomes `ETB0013`, and IDs above 9999 are not truncated.
-
-On Windows PowerShell, from the project root:
-
-```powershell
-Select-String -Path .\logs\event-ticket-booking.json -Pattern 'ETB0001'
-Get-ChildItem .\logs -Recurse -File | Select-String -Pattern 'ETB0001'
-```
-
-The second command searches uncompressed text files. Archived `.gz` files need to be extracted or searched with a gzip-aware tool.
-
-Start with a clean Gradle build so stale files under `build/resources/main` are regenerated:
+Run all tests:
 
 ```powershell
-.\gradlew.bat clean bootRun
+.\gradlew.bat test
 ```
+
+Perform a clean build and run the tests:
+
+```powershell
+.\gradlew.bat clean test
+```
+
+The integration tests use Testcontainers to start a separate PostgreSQL test database. Docker Desktop must be running for these tests.
+
+The test database is isolated from the local development database and is normally removed when the Testcontainers lifecycle ends.
+
+## 9. Useful Docker Commands
+
+Stop the development database:
+
+```powershell
+docker compose down
+```
+
+Stop the database and remove its container while preserving the named volume:
+
+```powershell
+docker compose down
+```
+
+Remove the database volume and its persisted data only when you intentionally want to reset the development database:
+
+```powershell
+docker compose down -v
+```
+
+**Warning:** The `-v` option deletes the Compose-managed database volume and its data.
+
+## 10. Git Workflow
+
+Check the current changes:
+
+```powershell
+git status
+```
+
+Check for whitespace errors:
+
+```powershell
+git diff --check
+```
+
+Create a feature branch:
+
+```powershell
+git switch -c feature/event-booking-apis
+```
+
+Stage and commit your changes:
+
+```powershell
+git add .
+git commit -m "Complete event and booking APIs with integration tests"
+```
+
+Push the branch:
+
+```powershell
+git push -u origin feature/event-booking-apis
+```
+
+Open a Pull Request on GitHub with `main` as the base branch.
+
+## 11. Project Structure
+
+```text
+src/
+├── main/
+│   ├── java/com/ionixx/eventticketbooking/
+│   │   ├── controller/
+│   │   ├── dto/
+│   │   ├── entity/
+│   │   ├── repository/
+│   │   ├── service/
+│   │   └── EventTicketBookingApplication.java
+│   └── resources/
+│       ├── application.properties
+│       └── db/changelog/
+└── test/
+    └── java/com/ionixx/eventticketbooking/
+        └── integration/
+            └── EventApiIntegrationTest.java
+```
+
+This is a representative structure. Keep the actual folder names and package locations used by your repository.
+
+## 12. Error Handling
+
+The API validates request data and returns appropriate HTTP status codes for common errors, including:
+
+- `400 Bad Request` — invalid input or validation errors.
+- `404 Not Found` — requested event or booking does not exist.
+- `409 Conflict` — duplicate event or other defined conflict.
+- `201 Created` — successful creation of an event or booking.
+
+Exact response bodies depend on the endpoint and the application's exception-handling implementation.
