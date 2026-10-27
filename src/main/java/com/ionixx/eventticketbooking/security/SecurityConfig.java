@@ -1,3 +1,4 @@
+
 package com.ionixx.eventticketbooking.security;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -48,11 +49,16 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
 
                         // -------------------------------------------------
-                        // Public endpoints: no JWT is required.
+                        // Public authentication endpoints.
+                        // A JWT is not required for these routes.
                         // -------------------------------------------------
-
-                        // Login must be accessible so users can obtain a JWT.
-                        .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/auth/login",
+                                "/auth/register",
+                                "/auth/forgot-password",
+                                "/auth/reset-password"
+                        ).permitAll()
 
                         // Permit Swagger UI and its supporting static resources.
                         .requestMatchers(
@@ -88,9 +94,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/bookings")
                         .hasRole(Role.CUSTOMER.name())
 
-                        // -------------------------------------------------
                         // All remaining endpoints require a valid JWT.
-                        // -------------------------------------------------
                         .anyRequest().authenticated())
 
                 // Run JWT authentication inside Spring Security's filter chain.
