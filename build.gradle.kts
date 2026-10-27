@@ -4,6 +4,9 @@ plugins {
     id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.diffplug.spotless") version "7.2.1"
+
+    // Generates test coverage reports and verifies the coverage threshold.
+    jacoco
 }
 
 group = "com.ionixx"
@@ -11,6 +14,7 @@ version = "0.0.1-SNAPSHOT"
 
 java {
     toolchain {
+        // Compile and run the application using Java 21.
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
@@ -26,23 +30,36 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-liquibase")
+    implementation("org.springframework.boot:spring-boot-starter-security")
+
+    // Structured JSON logging
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
-    // Database
+    // Swagger UI and OpenAPI documentation
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.2.0")
+
+    // JWT: API at compile time, implementation and JSON serializer at runtime.
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+
+    // PostgreSQL database driver
     runtimeOnly("org.postgresql:postgresql")
 
     // Development tools
     developmentOnly("org.springframework.boot:spring-boot-devtools")
 
-    // Testing
+    // Testing support
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-security-test")
     testImplementation("org.springframework.boot:spring-boot-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
 
-    // Testcontainers for PostgreSQL integration tests
+    // Testcontainers for PostgreSQL integration tests.
+    // The BOM keeps the Testcontainers modules on compatible versions.
     testImplementation(platform("org.testcontainers:testcontainers-bom:1.21.3"))
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
@@ -50,6 +67,49 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Use JUnit 5 for all Gradle test tasks.
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// JaCoCo generates code-coverage data from the test execution.
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+// Automatically generate the HTML and XML coverage reports after tests.
+tasks.test {
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+}
+
+// Fail the verification task if overall line coverage is below 80%.
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+
+    violationRules {
+        rule {
+            element = "BUNDLE"
+
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.80".toBigDecimal()
+            }
+        }
+    }
+}
+
+// Make the normal Gradle check task enforce the coverage threshold.
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
