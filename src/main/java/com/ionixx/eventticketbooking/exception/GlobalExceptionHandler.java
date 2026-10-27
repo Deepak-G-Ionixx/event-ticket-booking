@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.ionixx.eventticketbooking.dto.ApiErrorResponse;
 import com.ionixx.eventticketbooking.filter.RequestIdFilter;
-
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
@@ -35,6 +34,18 @@ public class GlobalExceptionHandler {
     public GlobalExceptionHandler(
             HttpServletRequest httpServletRequest) {
         this.httpServletRequest = httpServletRequest;
+    }
+    // Returns 409 when a registration request uses an existing email.
+    @ExceptionHandler(EmailAlreadyRegisteredException.class)
+    public ResponseEntity<ApiErrorResponse> handleEmailAlreadyRegistered(
+            EmailAlreadyRegisteredException exception) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "EMAIL_ALREADY_REGISTERED",
+                exception.getMessage(),
+                List.of()
+        );
     }
 
     // Handles @Valid request DTO validation failures.
