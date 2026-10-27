@@ -26,6 +26,7 @@
             <includeMdcKeyName>method</includeMdcKeyName>
             <includeMdcKeyName>path</includeMdcKeyName>
             <includeMdcKeyName>eventLogId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
             <customFields>{"app":"${app}"}</customFields>
         </encoder>
     </appender>
@@ -37,6 +38,7 @@
             <includeMdcKeyName>method</includeMdcKeyName>
             <includeMdcKeyName>path</includeMdcKeyName>
             <includeMdcKeyName>eventLogId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
             <customFields>{"app":"${app}"}</customFields>
         </encoder>
     </appender>

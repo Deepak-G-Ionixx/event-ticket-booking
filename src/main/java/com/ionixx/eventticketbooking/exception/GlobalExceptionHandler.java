@@ -8,9 +8,13 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -195,6 +199,41 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // 401: wrong email/password on POST /auth/login (or any AuthenticationException
+    // thrown from a controller). Failures inside the security filter chain are handled
+    // by RestAuthenticationEntryPoint instead.
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuthentication(
+            AuthenticationException exception) {
+
+        boolean badCredentials = exception instanceof BadCredentialsException;
+
+        return buildResponse(
+                HttpStatus.UNAUTHORIZED,
+                badCredentials ? "INVALID_CREDENTIALS" : "UNAUTHORIZED",
+                badCredentials
+                        ? "Invalid email or password"
+                        : "Authentication is required to access this resource",
+                List.of(),
+                "Bearer"
+        );
+    }
+
+    // 403: authenticated, but not allowed. Without this handler, an AccessDeniedException
+    // thrown from a controller (for example by a future @PreAuthorize) would be caught
+    // by the catch-all below and turned into a 500.
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccessDenied(
+            AccessDeniedException exception) {
+
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                "FORBIDDEN",
+                "You do not have permission to perform this action",
+                List.of()
+        );
+    }
+
     // Catch-all: logs the real exception but avoids exposing internals.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
@@ -221,6 +260,16 @@ public class GlobalExceptionHandler {
             String message,
             List<ApiErrorResponse.FieldError> errors) {
 
+        return buildResponse(status, code, message, errors, null);
+    }
+
+    private ResponseEntity<ApiErrorResponse> buildResponse(
+            HttpStatus status,
+            String code,
+            String message,
+            List<ApiErrorResponse.FieldError> errors,
+            String wwwAuthenticate) {
+
         String requestId = getRequestId();
 
         ApiErrorResponse body = new ApiErrorResponse(
@@ -233,9 +282,14 @@ public class GlobalExceptionHandler {
                 errors
         );
 
-        return ResponseEntity.status(status)
-                .header(RequestIdFilter.HEADER, requestId)
-                .body(body);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status)
+                .header(RequestIdFilter.HEADER, requestId);
+
+        if (wwwAuthenticate != null) {
+            builder.header(HttpHeaders.WWW_AUTHENTICATE, wwwAuthenticate);
+        }
+
+        return builder.body(body);
     }
 
     private String getRequestId() {

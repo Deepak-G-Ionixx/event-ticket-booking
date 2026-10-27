@@ -1,4 +1,3 @@
-
 package com.ionixx.eventticketbooking.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -6,81 +5,39 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
 
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import com.ionixx.eventticketbooking.entity.Role;
 
 import tools.jackson.databind.JsonNode;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
-class EventApiIntegrationTest {
+/**
+ * Existing API behaviour, now exercised through the security layer:
+ * events are created by an ORGANISER, bookings by a CUSTOMER, reads by either.
+ */
+class EventApiIntegrationTest extends AbstractIntegrationTest {
 
-    static {
-        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"));
-    }
+    private String organiserToken;
+    private String customerToken;
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16")
-                    .withDatabaseName("eventticketdb")
-                    .withUsername("postgres")
-                    .withPassword("postgres")
-                    .withEnv("TZ", "Asia/Kolkata")
-                    .withEnv("PGTZ", "Asia/Kolkata");
-    //This code creates a temporary PostgreSQL database inside a Docker container for your integration tests.
-
-    @DynamicPropertySource
-    static void configureDatabase(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
-        registry.add("spring.datasource.driver-class-name",
-                POSTGRES::getDriverClassName);
-    }
-
-    @LocalServerPort
-    private int port;
-
-    private RestClient restClient() {
-        return RestClient.builder()
-                .baseUrl("http://localhost:" + port)
-                .build();
+    @BeforeEach
+    void logIn() {
+        organiserToken = tokenFor(Role.ORGANISER);
+        customerToken = tokenFor(Role.CUSTOMER);
     }
 
     private JsonNode get(String path) {
-        return restClient()
-                .get()
-                .uri(path)
-                .retrieve()
-                .body(JsonNode.class);
+        ApiResult result = get(path, customerToken);
+        assertThat(result.status()).isEqualTo(HttpStatus.OK.value());
+        return result.body();
     }
 
     private int getStatusCode(String path) {
-        try {
-            restClient()
-                    .get()
-                    .uri(path)
-                    .retrieve()
-                    .toBodilessEntity();
-
-            return HttpStatus.OK.value();
-        } catch (RestClientResponseException exception) {
-            return exception.getStatusCode().value();
-        }
+        return get(path, customerToken).status();
     }
 
     @Test
@@ -211,18 +168,12 @@ class EventApiIntegrationTest {
                 "totalSeats", 20,
                 "basePrice", 1500.00);
 
-        JsonNode response = restClient()
-                .post()
-                .uri("/api/events")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
-                .retrieve()
-                .body(JsonNode.class);
+        ApiResult result = post("/api/events", organiserToken, request);
 
-        assertThat(response).isNotNull();
-        assertThat(response.path("id").asInt()).isPositive();
+        assertThat(result.status()).isEqualTo(HttpStatus.CREATED.value());
+        assertThat(result.body().path("id").asInt()).isPositive();
 
-        return response.path("id").asInt();
+        return result.body().path("id").asInt();
     }
 
     private void createBooking(
@@ -236,16 +187,10 @@ class EventApiIntegrationTest {
                 "customer_email", customerEmail,
                 "seat_numbers", seatNumbers);
 
-        JsonNode response = restClient()
-                .post()
-                .uri("/api/bookings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
-                .retrieve()
-                .body(JsonNode.class);
+        ApiResult result = post("/api/bookings", customerToken, request);
 
-        assertThat(response).isNotNull();
-        assertThat(response.path("id").asInt()).isPositive();
-        assertThat(response.path("status").asText()).isEqualTo("CONFIRMED");
+        assertThat(result.status()).isEqualTo(HttpStatus.CREATED.value());
+        assertThat(result.body().path("id").asInt()).isPositive();
+        assertThat(result.body().path("status").asText()).isEqualTo("CONFIRMED");
     }
 }
