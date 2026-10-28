@@ -1,0 +1,88 @@
+
+  name: event-ticket-booking
+
+  services:
+    postgres:
+      image: postgres:16
+      #container_name: event-ticket-postgres
+      restart: unless-stopped
+
+      # Load PostgreSQL database credentials from the local properties file.
+      env_file:
+        - local.properties
+
+      # Configure the PostgreSQL container timezone.
+      environment:
+        TZ: Asia/Kolkata
+        PGTZ: Asia/Kolkata
+
+      ports:
+        - "5433:5432" # Host port 5433 -> container port 5432
+
+      # Persist database data when the container is recreated.
+      # For PostgreSQL 16, use /var/lib/postgresql/data.
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+
+      # Start the application only when PostgreSQL is ready.
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+          ]
+        interval: 5s
+        timeout: 5s
+        retries: 10
+        start_period: 10s
+
+    app:
+      build:
+        context: .
+        dockerfile: Dockerfile
+
+      image: event-ticket-booking:local
+      #container_name: event-ticket-app
+      restart: unless-stopped
+
+      # Wait for PostgreSQL to pass its health check.
+      depends_on:
+        postgres:
+          condition: service_healthy
+
+      # Load shared configuration from the local properties file.
+      env_file:
+        - local.properties
+
+      # Configure the Spring Boot application.
+      environment:
+        SPRING_PROFILES_ACTIVE: docker
+        DB_HOST: postgres
+        DB_PORT: "5432"
+        LOG_DIR: /app/logs
+        TZ: Asia/Kolkata
+
+      ports:
+        - "8080:8080"
+
+      # Persist application logs outside the container.
+      volumes:
+        - app_logs:/app/logs
+
+      # Check whether the application is responding.
+      healthcheck:
+        test:
+          [
+            "CMD",
+            "curl",
+            "-fsS",
+            "http://127.0.0.1:8080/actuator/health"
+          ]
+        interval: 15s
+        timeout: 5s
+        retries: 5
+        start_period: 60s
+
+  volumes:
+    postgres_data:
+    app_logs:

@@ -1,0 +1,26 @@
+# Copy this file to local.properties and fill in real values.
+# local.properties is gitignored and must never be committed.
+# Keep the format simple: KEY=value, no quotes, no spaces around "=", no "$".
+
+# --- PostgreSQL (used by the postgres container and the app) ---
+POSTGRES_DB=eventticketdb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=change-me
+
+# --- JWT ---
+# Must be at least 32 characters. Generate one in PowerShell:
+#   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+JWT_SECRET=change-me-generate-a-random-secret-of-48-bytes
+JWT_EXPIRATION=60m
+JWT_ISSUER=event-ticket-booking
+
+# Demo accounts have publicly known passwords. Keep false except on your own machine.
+SEED_DEMO_USERS=false
+
+# --- Mail (optional, needed only for forgot-password emails) ---
+# MAIL_HOST=smtp.example.com
+# MAIL_PORT=587
+# MAIL_USERNAME=
+# MAIL_PASSWORD=
+# MAIL_FROM=no-reply@example.com
+# PASSWORD_RESET_BASE_URL=http://localhost:3000/reset-password

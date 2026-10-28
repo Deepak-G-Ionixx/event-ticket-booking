@@ -1,3 +1,4 @@
+import java.util.UUID
 
 plugins {
     id("java")
@@ -67,9 +68,34 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Fixed jar name so the Dockerfile can copy build/libs/app.jar.
+tasks.bootJar {
+    archiveFileName.set("app.jar")
+}
+
+// Spotless: `./gradlew spotlessCheck` (CI) and `./gradlew spotlessApply` (auto-fix).
+// Line endings follow .gitattributes (LF), so Windows and Linux agree.
+spotless {
+    java {
+        target("src/**/*.java")
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
 // Use JUnit 5 for all Gradle test tasks.
 tasks.withType<Test> {
     useJUnitPlatform()
+
+    // Same timezone on every machine (Windows reports the legacy name "Asia/Calcutta",
+    // which the postgres:16 image rejects).
+    jvmArgs("-Duser.timezone=Asia/Kolkata")
+
+    // application.properties requires JWT_SECRET. If it is not set (for example in CI),
+    // use a throwaway random value so nothing secret is stored in the repository.
+    if (System.getenv("JWT_SECRET").isNullOrBlank()) {
+        environment("JWT_SECRET", "${UUID.randomUUID()}${UUID.randomUUID()}")
+    }
 }
 
 // JaCoCo generates code-coverage data from the test execution.

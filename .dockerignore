@@ -1,0 +1,29 @@
+.git
+.gitignore
+.gitattributes
+.github
+
+# Build output and IDE files
+.gradle
+build
+out
+.idea
+*.iml
+.vscode
+
+# Logs
+logs
+*.log
+
+# Secrets must never be copied into an image
+local.properties
+*.local.properties
+.env
+.env.*
+
+# Not needed inside the image
+Dockerfile
+compose.yaml
+docker-compose.yaml
+README.md
+HELP.md

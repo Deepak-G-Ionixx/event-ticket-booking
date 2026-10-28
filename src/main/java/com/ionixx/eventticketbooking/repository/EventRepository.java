@@ -10,4 +10,3 @@ public interface EventRepository extends JpaRepository<Event, Integer> {
 
     boolean existsByNameAndEventDate(String name, LocalDate eventDate);
 }
-

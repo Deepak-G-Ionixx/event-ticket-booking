@@ -1,3 +1,6 @@
-/gradlew text eol=lf
+# Normalise line endings so Spotless gives the same result on Windows and in CI.
+* text=auto eol=lf
 *.bat text eol=crlf
+*.cmd text eol=crlf
 *.jar binary
+*.zip binary
