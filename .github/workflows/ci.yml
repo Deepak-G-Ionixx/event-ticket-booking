@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Spotless + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Make sure no local secrets file is tracked
+        run: |
+          if [ -n "$(git ls-files 'local.properties' '*.local.properties' '.env' '.env.*' | grep -v '\.example$' || true)" ]; then
+            echo "A local secrets file is committed. Remove it from Git."
+            exit 1
+          fi
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle (with dependency cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Spotless check
+        run: ./gradlew spotlessCheck
+
+      # Integration tests start PostgreSQL through Testcontainers.
+      # Docker is preinstalled on ubuntu-latest runners.
+      # JWT_SECRET is generated per run by build.gradle.kts, so no GitHub secret is needed.
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test
+
+  docker-build:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (not pushed)
+        run: docker build -t event-ticket-booking:ci .

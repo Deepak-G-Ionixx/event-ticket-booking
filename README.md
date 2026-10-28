@@ -349,3 +349,28 @@ The API validates request data and returns appropriate HTTP status codes for com
 - `201 Created` — successful creation of an event or booking.
 
 Exact response bodies depend on the endpoint and the application's exception-handling implementation.
+
+
+
+## Run everything with Docker
+
+1. Create your private config (it is gitignored):
+   ```powershell
+   Copy-Item local.properties.example local.properties
+   ```
+   Edit `local.properties` and set `POSTGRES_PASSWORD` and a real `JWT_SECRET`.
+2. Start the app and PostgreSQL:
+   ```powershell
+   docker compose up --build
+   ```
+   Liquibase creates the tables on startup.
+3. Check it: http://localhost:8080/actuator/health and http://localhost:8080/swagger-ui.html
+
+Stop with `docker compose down`. Use `docker compose down -v` only to delete the database volume.
+
+To run only the database and start the app from IntelliJ, use `docker compose up -d postgres`.
+The old `docker compose up -d` in section 4 now starts the app too.
+
+### CI
+Every pull request runs `spotlessCheck` and `./gradlew test` (GitHub Actions, `.github/workflows/ci.yml`).
+Fix formatting locally with `.\gradlew.bat spotlessApply`.

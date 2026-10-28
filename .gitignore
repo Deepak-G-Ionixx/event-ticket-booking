@@ -55,3 +55,8 @@ Thumbs.db
 # Log files
 logs/
 *.log
+
+
+# Local secrets for Docker Compose. Never commit.
+local.properties
+*.local.properties
