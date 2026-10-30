@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
+import com.ionixx.eventticketbooking.entity.Role;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,7 +32,7 @@ class AuthControllerTest {
     @Test
     void registerReturns201WithCreatedAccount() {
         RegisterRequest request =
-                new RegisterRequest("John Doe", "john@example.com", "password123");
+                new RegisterRequest("John Doe", "john@example.com", "password123", Role.CUSTOMER);
         RegisterResponse response = new RegisterResponse(
                 1, "John Doe", "john@example.com", "CUSTOMER", "created");
         when(authService.register(request)).thenReturn(response);

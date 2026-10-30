@@ -1,4 +1,3 @@
-
 package com.ionixx.eventticketbooking.service;
 
 import org.slf4j.Logger;
@@ -49,10 +48,10 @@ public class AuthService {
     }
 
     /**
-     * Registers a new customer.
+     * Registers a new user as a CUSTOMER or an ORGANISER, as chosen in the request.
      *
-     * The role is assigned by the server. A registration request
-     * cannot create an ORGANISER account.
+     * The Role enum has no other values, so a registration request can never
+     * create any other kind of account.
      */
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -68,19 +67,21 @@ public class AuthService {
         // Never store the raw password in the database.
         String passwordHash = passwordEncoder.encode(request.password());
 
-        // Public registration always creates a CUSTOMER.
+        // The role comes from the request (CUSTOMER when it was left out).
+        Role role = request.role();
+
         User newUser = new User(
                 request.name(),
                 normalizedEmail,
                 passwordHash,
-                Role.CUSTOMER);
+                role);
 
         try {
             // Flush here so a database unique-email constraint violation
             // can also be translated into a duplicate-email exception.
             User savedUser = userRepository.saveAndFlush(newUser);
 
-            log.info("Customer registered successfully: userId={}, role={}",
+            log.info("User registered successfully: userId={}, role={}",
                     savedUser.getId(), savedUser.getRole());
 
             return new RegisterResponse(
@@ -88,7 +89,9 @@ public class AuthService {
                     savedUser.getName(),
                     savedUser.getEmail(),
                     savedUser.getRole().name(),
-                    "Customer account registered successfully");
+                    role == Role.ORGANISER
+                            ? "Organiser account registered successfully"
+                            : "Customer account registered successfully");
 
         } catch (DataIntegrityViolationException exception) {
             // The database constraint protects against simultaneous

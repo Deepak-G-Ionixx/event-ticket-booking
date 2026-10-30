@@ -4,11 +4,18 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,20 +24,32 @@ import com.ionixx.eventticketbooking.dto.CreateBookingRequest;
 import com.ionixx.eventticketbooking.dto.EventSeatMapResponse;
 import com.ionixx.eventticketbooking.dto.EventSummaryResponse;
 import com.ionixx.eventticketbooking.entity.Booking;
+import com.ionixx.eventticketbooking.entity.BookingSeat;
 import com.ionixx.eventticketbooking.entity.BookingStatus;
 import com.ionixx.eventticketbooking.entity.Event;
+import com.ionixx.eventticketbooking.entity.Role;
+import com.ionixx.eventticketbooking.entity.User;
 import com.ionixx.eventticketbooking.exception.BookingNotFoundException;
 import com.ionixx.eventticketbooking.exception.EventNotFoundException;
 import com.ionixx.eventticketbooking.exception.InvalidBookingRequestException;
+import com.ionixx.eventticketbooking.exception.SeatAlreadyBookedException;
 import com.ionixx.eventticketbooking.exception.SeatOutOfRangeException;
 import com.ionixx.eventticketbooking.repository.BookingRepository;
+import com.ionixx.eventticketbooking.repository.BookingSeatRepository;
+import com.ionixx.eventticketbooking.repository.BookingStatusTotals;
 import com.ionixx.eventticketbooking.repository.EventRepository;
-
+import com.ionixx.eventticketbooking.security.AccessRules;
+import com.ionixx.eventticketbooking.security.CurrentUser;
+import com.ionixx.eventticketbooking.security.UserPrincipal;
+import com.ionixx.eventticketbooking.security.AuthenticatedUserService;
 @Service
 public class BookingService {
 
     private static final int MAX_SEATS_PER_BOOKING = 6;
     private static final int MAX_SEATS_PER_CUSTOMER_PER_EVENT = 6;
+
+    // Matches booking.customer_name VARCHAR(50).
+    private static final int MAX_CUSTOMER_NAME_LENGTH = 50;
 
     private static final BigDecimal EARLY_BIRD_MULTIPLIER =
             new BigDecimal("0.90");
@@ -38,34 +57,78 @@ public class BookingService {
     private static final BigDecimal GROUP_MULTIPLIER =
             new BigDecimal("0.95");
 
+    /**
+     * Properties a client may sort booking lists by (API name -> entity property).
+     * Both camelCase and the snake_case JSON names are accepted.
+     */
+    static final Map<String, String> BOOKING_SORT_PROPERTIES = Map.of(
+            "id", "id",
+            "bookedOn", "bookedOn",
+            "booked_on", "bookedOn",
+            "seats", "seats",
+            "totalAmount", "totalAmount",
+            "total_amount", "totalAmount",
+            "status", "status");
+
+    // Newest bookings first. ID provides a consistent tie-breaker.
+    private static final Sort DEFAULT_BOOKING_SORT = Sort.by(
+            Sort.Order.desc("bookedOn"),
+            Sort.Order.desc("id"));
+
+    private static final Sort.Order BOOKING_TIE_BREAKER = Sort.Order.desc("id");
+
     private final BookingRepository bookingRepository;
     private final EventRepository eventRepository;
+    private final BookingSeatRepository bookingSeatRepository;
+    private final AuthenticatedUserService authenticatedUserService;
 
     public BookingService(
             BookingRepository bookingRepository,
-            EventRepository eventRepository) {
+            EventRepository eventRepository,
+            BookingSeatRepository bookingSeatRepository,
+            AuthenticatedUserService authenticatedUserService) {
 
         this.bookingRepository = bookingRepository;
         this.eventRepository = eventRepository;
+        this.bookingSeatRepository = bookingSeatRepository;
+        this.authenticatedUserService = authenticatedUserService;
     }
 
-    // Existing POST /api/bookings business logic.
+    /**
+     * Creates a booking for the currently authenticated customer.
+     *
+     * Transaction boundary (everything commits together or rolls back together):
+     * 1. Validate the request (no database access).
+     * 2. Load and lock the authenticated customer's account.
+     * 3. Load the event with a shared lock and validate the requested seats.
+     * 4. Apply the business rules and calculate the price.
+     * 5. Insert the booking and one booking_seat row per seat. The unique
+     *    constraint (event_id, seat_number) is the final guard against two
+     *    concurrent requests for the same seat.
+     *
+     * The customer id and email always come from the authenticated account.
+     * A customer email in the request body is ignored, so nobody can create
+     * a booking in another customer's name.
+     */
     @Transactional
     public BookingResponse createBooking(CreateBookingRequest request) {
 
+        validateBookingRequest(request);
         validateSeatNumbers(request.seatNumbers());
 
-        Event event = eventRepository.findById(request.eventId())
-                .orElseThrow(() ->
-                        new EventNotFoundException(request.eventId()));
+        // Identity from the JWT, re-checked against the database and row-locked.
+        User customer = authenticatedUserService
+                .requireCurrentUserForUpdate(Role.CUSTOMER);
 
-        for (Integer seatNumber : request.seatNumbers()) {
-            if (seatNumber > event.getTotalSeats()) {
-                throw new SeatOutOfRangeException(seatNumber);
-            }
-        }
+        Event event = eventRepository.findByIdForShare(request.eventId())
+                .orElseThrow(() -> new EventNotFoundException(request.eventId()));
 
-        List<Integer> sortedSeats = request.seatNumbers().stream()
+        // Every requested seat must belong to the selected event.
+        validateSeatNumbersAgainstEvent(request.seatNumbers(), event);
+
+        // Sort seat numbers so the stored value and response are consistent.
+        // Sorted inserts also give every transaction the same lock order.
+        List<Integer> sortedSeatNumbers = request.seatNumbers().stream()
                 .sorted()
                 .toList();
 
@@ -73,32 +136,33 @@ public class BookingService {
 
         String rejectionReason = determineRejectionReason(
                 event,
-                request.customerEmail(),
-                sortedSeats,
+                customer.getId(),
+                sortedSeatNumbers,
                 today);
 
         Booking booking = new Booking(
                 event,
-                request.customerName(),
-                request.customerEmail(),
-                sortedSeats.stream()
+                resolveCustomerName(request.customerName(), customer),
+                customer.getEmail(),
+                sortedSeatNumbers.stream()
                         .map(String::valueOf)
                         .collect(Collectors.joining(",")),
-                sortedSeats.size(),
+                sortedSeatNumbers.size(),
                 rejectionReason == null
                         ? BookingStatus.CONFIRMED
                         : BookingStatus.REJECTED,
                 rejectionReason,
-                today);
+                today,
+                customer.getId());
 
         if (rejectionReason == null) {
             BigDecimal pricePerSeat = calculatePricePerSeat(
                     event,
-                    sortedSeats.size(),
+                    sortedSeatNumbers.size(),
                     today);
 
-            BigDecimal totalAmount = pricePerSeat
-                    .multiply(BigDecimal.valueOf(sortedSeats.size()))
+            BigDecimal totalAmount = pricePerSeat.multiply(
+                            BigDecimal.valueOf(sortedSeatNumbers.size()))
                     .setScale(2, RoundingMode.HALF_UP);
 
             booking.confirm(pricePerSeat, totalAmount);
@@ -106,256 +170,415 @@ public class BookingService {
             booking.reject(rejectionReason);
         }
 
-        return toResponse(bookingRepository.save(booking));
+        Booking savedBooking = bookingRepository.saveAndFlush(booking);
+
+        // Only confirmed bookings reserve seats.
+        if (savedBooking.getStatus() == BookingStatus.CONFIRMED) {
+
+            List<BookingSeat> bookingSeats = sortedSeatNumbers.stream()
+                    .map(seatNumber -> new BookingSeat(
+                            event,
+                            savedBooking,
+                            seatNumber))
+                    .toList();
+
+            try {
+                // The database constraint protects against concurrent bookings.
+                bookingSeatRepository.saveAllAndFlush(bookingSeats);
+            } catch (DataIntegrityViolationException exception) {
+                // The exception leaves the method, so the whole transaction
+                // (including the booking row above) is rolled back.
+                throw new SeatAlreadyBookedException(
+                        "One or more requested seats have already been booked");
+            }
+        }
+
+        return toResponse(savedBooking);
     }
 
-    // Existing GET /api/bookings/{id}.
+    /**
+     * Returns one booking after checking that the current user is allowed
+     * to view it.
+     */
     @Transactional(readOnly = true)
-    public BookingResponse getBookingById(Integer id) {
+    public BookingResponse getBookingById(Integer bookingId) {
+
+        UserPrincipal user = CurrentUser.require();
 
         Booking booking = bookingRepository
-                .findBookingWithEventById(id)
-                .orElseThrow(() -> new BookingNotFoundException(id));
+                .findBookingWithEventById(bookingId)
+                .orElseThrow(() -> new BookingNotFoundException(bookingId));
+
+        // Prevent users from viewing bookings they are not authorized to access.
+        AccessRules.requireCanViewBooking(user, booking);
 
         return toResponse(booking);
     }
 
-    // GET /api/events/{id}/bookings?status=CONFIRMED
+    /**
+     * Returns one page of bookings for an event owned by the current organiser.
+     *
+     * The ownership check runs before the paging parameters are validated and
+     * before any booking is read, so no page (and no error message) reveals
+     * anything about another organiser's event.
+     */
     @Transactional(readOnly = true)
-    public List<BookingResponse> getEventBookings(
+    public Page<BookingResponse> getEventBookings(
             Integer eventId,
-            BookingStatus status) {
+            BookingStatus status,
+            int page,
+            int size,
+            String sort) {
 
-        ensureEventExists(eventId);
+        UserPrincipal user = CurrentUser.require();
 
-        List<Booking> bookings;
+        OwnedEvents.require(
+                user,
+                eventId,
+                organiserId -> eventRepository.findByIdAndOrganiserId(
+                        eventId, organiserId),
+                eventRepository);
 
-        if (status == null) {
-            bookings = bookingRepository
-                    .findAllByEvent_IdOrderByBookedOnDescIdDesc(eventId);
-        } else {
-            bookings = bookingRepository
-                    .findAllByEvent_IdAndStatusOrderByBookedOnDescIdDesc(
-                            eventId,
-                            status);
-        }
+        Pageable pageable = bookingPageRequest(page, size, sort);
 
-        return bookings.stream()
-                .map(this::toResponse)
-                .toList();
+        Page<Booking> bookingPage = status == null
+                ? bookingRepository.findAllByEvent_Id(eventId, pageable)
+                : bookingRepository.findAllByEvent_IdAndStatus(
+                eventId,
+                status,
+                pageable);
+
+        return bookingPage.map(this::toResponse);
     }
 
-    // GET /api/events/{id}/seats
+    /**
+     * Returns one page of the logged-in customer's own bookings.
+     * The customer ID comes from the authenticated user, never the request.
+     */
+    @Transactional(readOnly = true)
+    public Page<BookingResponse> getMyBookings(
+            BookingStatus status,
+            int page,
+            int size,
+            String sort) {
+
+        UserPrincipal user = CurrentUser.require();
+
+        Pageable pageable = bookingPageRequest(page, size, sort);
+
+        Page<Booking> bookingPage = status == null
+                ? bookingRepository.findAllByCustomerId(user.id(), pageable)
+                : bookingRepository.findAllByCustomerIdAndStatus(
+                user.id(),
+                status,
+                pageable);
+
+        return bookingPage.map(this::toResponse);
+    }
+
+    /**
+     * Returns confirmed and available seats for an event.
+     */
     @Transactional(readOnly = true)
     public EventSeatMapResponse getEventSeatMap(Integer eventId) {
 
-        Event event = ensureEventExists(eventId);
+        UserPrincipal user = CurrentUser.require();
 
-        List<Booking> confirmedBookings =
-                bookingRepository.findAllByEvent_IdAndStatus(
-                        eventId,
-                        BookingStatus.CONFIRMED);
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
 
-        Set<Integer> bookedSeats = new TreeSet<>();
+        // Enforce the existing event visibility rules.
+        AccessRules.requireCanViewEvent(user, event);
 
-        for (Booking booking : confirmedBookings) {
-            bookedSeats.addAll(
-                    parseSeatNumbers(booking.getSeatNumbers()));
-        }
+        List<Integer> bookedSeats =
+                bookingSeatRepository.findConfirmedSeatNumbersByEventId(eventId);
+
+        Set<Integer> bookedSeatSet = new TreeSet<>(bookedSeats);
 
         List<Integer> availableSeats = new ArrayList<>();
 
-        for (int seat = 1; seat <= event.getTotalSeats(); seat++) {
-            if (!bookedSeats.contains(seat)) {
-                availableSeats.add(seat);
+        for (int seatNumber = 1;
+             seatNumber <= event.getTotalSeats();
+             seatNumber++) {
+
+            if (!bookedSeatSet.contains(seatNumber)) {
+                availableSeats.add(seatNumber);
             }
         }
 
         return new EventSeatMapResponse(
-                event.getId(),
+                eventId,
                 event.getTotalSeats(),
-                List.copyOf(bookedSeats),
+                new ArrayList<>(bookedSeatSet),
                 availableSeats);
     }
 
-    // GET /api/events/{id}/summary
+    /**
+     * Returns summary information for an event.
+     * Only the event's organizer may view this summary.
+     *
+     * Counts and sums are calculated by one GROUP BY query instead of
+     * loading every booking of the event into memory.
+     */
     @Transactional(readOnly = true)
     public EventSummaryResponse getEventSummary(Integer eventId) {
 
-        Event event = ensureEventExists(eventId);
+        UserPrincipal user = CurrentUser.require();
 
-        List<Booking> confirmedBookings =
-                bookingRepository.findAllByEvent_IdAndStatus(
-                        eventId,
-                        BookingStatus.CONFIRMED);
+        Event event = OwnedEvents.require(
+                user,
+                eventId,
+                organiserId -> eventRepository.findByIdAndOrganiserId(
+                        eventId, organiserId),
+                eventRepository);
 
-        List<Booking> rejectedBookings =
-                bookingRepository.findAllByEvent_IdAndStatus(
-                        eventId,
-                        BookingStatus.REJECTED);
+        long confirmedBookings = 0;
+        long rejectedBookings = 0;
+        long seatsSold = 0;
+        BigDecimal totalRevenue = BigDecimal.ZERO;
 
-        int seatsSold = confirmedBookings.stream()
-                .mapToInt(Booking::getSeats)
-                .sum();
+        for (BookingStatusTotals totals
+                : bookingRepository.summarizeByStatus(eventId)) {
 
-        BigDecimal totalRevenue = confirmedBookings.stream()
-                .map(Booking::getTotalAmount)
-                .filter(amount -> amount != null)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
+            if (totals.getBookingStatus() == BookingStatus.CONFIRMED) {
+                confirmedBookings = Objects.requireNonNullElse(
+                        totals.getBookingCount(), 0L);
+                seatsSold = Objects.requireNonNullElse(
+                        totals.getSeatCount(), 0L);
+                totalRevenue = Objects.requireNonNullElse(
+                        totals.getRevenue(), BigDecimal.ZERO);
+            } else {
+                rejectedBookings = Objects.requireNonNullElse(
+                        totals.getBookingCount(), 0L);
+            }
+        }
 
-        BigDecimal exactOccupancy = BigDecimal.valueOf(seatsSold)
-                .multiply(BigDecimal.valueOf(100))
-                .divide(
-                        BigDecimal.valueOf(event.getTotalSeats()),
-                        6,
-                        RoundingMode.HALF_UP);
+        totalRevenue = totalRevenue.setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal occupancyPct = exactOccupancy.setScale(
-                1,
-                RoundingMode.HALF_UP);
+        int totalSeats = event.getTotalSeats();
+        int soldSeats = Math.toIntExact(seatsSold);
+        int availableSeats = totalSeats - soldSeats;
+
+        // Occupancy is expressed as a percentage rounded to one decimal place.
+        BigDecimal occupancyPct = BigDecimal.ZERO.setScale(1);
+
+        if (totalSeats > 0) {
+            occupancyPct = BigDecimal.valueOf(soldSeats)
+                    .multiply(BigDecimal.valueOf(100))
+                    .divide(
+                            BigDecimal.valueOf(totalSeats),
+                            1,
+                            RoundingMode.HALF_UP);
+        }
 
         String demandBand;
 
-        if (exactOccupancy.compareTo(new BigDecimal("40")) < 0) {
+        if (occupancyPct.compareTo(new BigDecimal("40.0")) < 0) {
             demandBand = "LOW";
-        } else if (exactOccupancy.compareTo(new BigDecimal("75")) <= 0) {
+        } else if (occupancyPct.compareTo(new BigDecimal("75.0")) <= 0) {
             demandBand = "MEDIUM";
         } else {
             demandBand = "HIGH";
         }
 
         return new EventSummaryResponse(
-                event.getId(),
+                eventId,
                 event.getName(),
-                event.getTotalSeats(),
-                seatsSold,
-                event.getTotalSeats() - seatsSold,
-                confirmedBookings.size(),
-                rejectedBookings.size(),
+                totalSeats,
+                soldSeats,
+                availableSeats,
+                Math.toIntExact(confirmedBookings),
+                Math.toIntExact(rejectedBookings),
                 totalRevenue,
                 occupancyPct,
                 demandBand);
     }
 
-    private Event ensureEventExists(Integer eventId) {
-        return eventRepository.findById(eventId)
-                .orElseThrow(() ->
-                        new EventNotFoundException(eventId));
+    /**
+     * Builds a validated page request for booking lists.
+     */
+    private Pageable bookingPageRequest(int page, int size, String sort) {
+        return PagingSupport.pageRequest(
+                page,
+                size,
+                sort,
+                BOOKING_SORT_PROPERTIES,
+                DEFAULT_BOOKING_SORT,
+                BOOKING_TIE_BREAKER);
     }
 
-    private void validateSeatNumbers(List<Integer> seatNumbers) {
+    /**
+     * Validates that a booking request was provided.
+     */
+    private void validateBookingRequest(CreateBookingRequest request) {
 
-        if (seatNumbers == null || seatNumbers.isEmpty()) {
+        if (request == null) {
             throw new InvalidBookingRequestException(
-                    "seat_numbers",
+                    "INVALID_BOOKING_REQUEST",
+                    "Booking request is required");
+        }
+    }
+
+    /**
+     * Validates the seat list before looking up or saving a booking.
+     */
+    private void validateSeatNumbers(List<Integer> requestedSeatNumbers) {
+
+        if (requestedSeatNumbers == null || requestedSeatNumbers.isEmpty()) {
+            throw new InvalidBookingRequestException(
+                    "INVALID_BOOKING_REQUEST",
                     "At least one seat number is required");
         }
 
-        if (seatNumbers.size() > MAX_SEATS_PER_BOOKING) {
+        if (requestedSeatNumbers.size() > MAX_SEATS_PER_BOOKING) {
             throw new InvalidBookingRequestException(
-                    "seat_numbers",
+                    "INVALID_BOOKING_REQUEST",
                     "A booking can contain at most 6 seats");
         }
 
-        if (seatNumbers.stream()
+        if (requestedSeatNumbers.stream()
                 .anyMatch(seat -> seat == null || seat <= 0)) {
             throw new InvalidBookingRequestException(
-                    "seat_numbers",
+                    "INVALID_BOOKING_REQUEST",
                     "Seat numbers must be positive integers");
         }
 
-        Set<Integer> uniqueSeats = new TreeSet<>(seatNumbers);
-
-        if (uniqueSeats.size() != seatNumbers.size()) {
+        if (requestedSeatNumbers.stream().distinct().count()
+                != requestedSeatNumbers.size()) {
             throw new InvalidBookingRequestException(
-                    "seat_numbers",
+                    "INVALID_BOOKING_REQUEST",
                     "Duplicate seat numbers are not allowed");
         }
     }
 
+    /**
+     * Checks that requested seat numbers do not exceed the event capacity.
+     */
+    private void validateSeatNumbersAgainstEvent(
+            List<Integer> requestedSeatNumbers,
+            Event event) {
+
+        for (Integer seatNumber : requestedSeatNumbers) {
+            if (seatNumber > event.getTotalSeats()) {
+                // SeatOutOfRangeException expects the invalid seat number.
+                throw new SeatOutOfRangeException(seatNumber);
+            }
+        }
+    }
+
+    /**
+     * The name printed on the booking. The request may supply a display
+     * name; otherwise the registered account name is used (shortened to
+     * the column length).
+     */
+    private static String resolveCustomerName(
+            String requestedName,
+            User customer) {
+
+        if (requestedName != null && !requestedName.isBlank()) {
+            return requestedName;
+        }
+
+        String accountName = customer.getName();
+
+        return accountName.length() > MAX_CUSTOMER_NAME_LENGTH
+                ? accountName.substring(0, MAX_CUSTOMER_NAME_LENGTH)
+                : accountName;
+    }
+
+    /**
+     * Returns a rejection reason if the booking violates a booking rule.
+     * A null result means the booking can be confirmed.
+     */
     private String determineRejectionReason(
             Event event,
-            String customerEmail,
-            List<Integer> requestedSeats,
+            Integer customerId,
+            List<Integer> requestedSeatNumbers,
             LocalDate today) {
 
         if (event.getEventDate().isBefore(today)) {
-            return "Event is already over";
+            return "EVENT_DATE_PASSED";
         }
 
-        List<Booking> confirmedBookings =
-                bookingRepository.findAllByEvent_IdAndStatus(
-                        event.getId(),
+        Integer eventId = event.getId();
+
+        // Friendly pre-check. The unique constraint still decides races.
+        List<Integer> alreadyBookedSeats =
+                bookingSeatRepository.findConfirmedSeatNumbersByEventId(eventId);
+
+        Set<Integer> bookedSeatSet = new TreeSet<>(alreadyBookedSeats);
+
+        boolean seatAlreadyBooked = requestedSeatNumbers.stream()
+                .anyMatch(bookedSeatSet::contains);
+
+        if (seatAlreadyBooked) {
+            return "SEAT_ALREADY_BOOKED";
+        }
+
+        // Count only confirmed seats belonging to the authenticated customer.
+        // The customer's row is locked, so this count cannot change underneath us.
+        Long alreadyBookedSeatsByCustomer =
+                bookingRepository.countConfirmedSeatsForCustomerId(
+                        eventId,
+                        customerId,
                         BookingStatus.CONFIRMED);
 
-        Set<Integer> takenSeats = new TreeSet<>();
+        long confirmedSeatCount = Objects.requireNonNullElse(
+                alreadyBookedSeatsByCustomer, 0L);
 
-        for (Booking existingBooking : confirmedBookings) {
-            takenSeats.addAll(
-                    parseSeatNumbers(existingBooking.getSeatNumbers()));
-        }
-
-        List<Integer> conflicts = requestedSeats.stream()
-                .filter(takenSeats::contains)
-                .sorted()
-                .toList();
-
-        if (!conflicts.isEmpty()) {
-            String conflictList = conflicts.stream()
-                    .map(String::valueOf)
-                    .collect(Collectors.joining(", "));
-
-            return "Seats already booked: " + conflictList;
-        }
-
-        Long existingSeats =
-                bookingRepository.countConfirmedSeatsForCustomer(
-                        event.getId(),
-                        customerEmail,
-                        BookingStatus.CONFIRMED);
-
-        long requestedTotal =
-                (existingSeats == null ? 0L : existingSeats)
-                        + requestedSeats.size();
-
-        if (requestedTotal > MAX_SEATS_PER_CUSTOMER_PER_EVENT) {
-            return "Customer already holds the maximum seats for this event";
+        // Include the seats in this request when enforcing the six-seat limit.
+        if (confirmedSeatCount + requestedSeatNumbers.size()
+                > MAX_SEATS_PER_CUSTOMER_PER_EVENT) {
+            return "CUSTOMER_SEAT_LIMIT_EXCEEDED";
         }
 
         return null;
     }
 
+    /**
+     * Calculates the per-seat price after applying applicable discounts.
+     */
     private BigDecimal calculatePricePerSeat(
             Event event,
-            int seatCount,
+            int requestedSeatCount,
             LocalDate today) {
 
         BigDecimal price = event.getBasePrice();
 
+        // Apply the early-bird discount when the event is at least 30 days away.
         if (!event.getEventDate().isBefore(today.plusDays(30))) {
             price = price.multiply(EARLY_BIRD_MULTIPLIER);
         }
 
-        if (seatCount >= 4) {
+        // Apply the group discount when four or more seats are booked.
+        if (requestedSeatCount >= 4) {
             price = price.multiply(GROUP_MULTIPLIER);
         }
 
         return price.setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * Converts comma-separated seat numbers stored in the database
+     * into a list of integers.
+     */
     private List<Integer> parseSeatNumbers(String seatNumbers) {
 
         if (seatNumbers == null || seatNumbers.isBlank()) {
             return List.of();
         }
 
-        return java.util.Arrays.stream(seatNumbers.split(","))
+        return Arrays.stream(seatNumbers.split(","))
                 .map(String::trim)
                 .map(Integer::valueOf)
                 .toList();
     }
 
+    /**
+     * Converts a Booking entity into the API response DTO.
+     * Only the event id is read from the association, which Hibernate
+     * answers without loading the event.
+     */
     private BookingResponse toResponse(Booking booking) {
 
         return new BookingResponse(

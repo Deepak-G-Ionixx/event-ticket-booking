@@ -1,0 +1,63 @@
+databaseChangeLog:
+  - changeSet:
+      id: 010-enforce-event-organiser-not-null
+      author: eventticketbooking
+      comment: >
+        Every event must have an owner. The changeset runs only when no event
+        is ownerless. Otherwise it is skipped (and retried on the next start)
+        so legacy rows are never given a guessed owner.
+      preConditions:
+        - onFail: CONTINUE
+          onFailMessage: >
+            Skipping NOT NULL on event.organiser_id: ownerless events exist.
+            Assign or remove them, then restart.
+        - sqlCheck:
+            expectedResult: 0
+            sql: SELECT COUNT(*) FROM event WHERE organiser_id IS NULL
+      changes:
+        - addNotNullConstraint:
+            tableName: event
+            columnName: organiser_id
+            columnDataType: INT
+
+  - changeSet:
+      id: 010-enforce-booking-customer-not-null
+      author: eventticketbooking
+      comment: >
+        Every booking must have an owner. Same rule as above: no guessing
+        owners for legacy bookings.
+      preConditions:
+        - onFail: CONTINUE
+          onFailMessage: >
+            Skipping NOT NULL on booking.customer_id: ownerless bookings exist.
+            Assign or remove them, then restart.
+        - sqlCheck:
+            expectedResult: 0
+            sql: SELECT COUNT(*) FROM booking WHERE customer_id IS NULL
+      changes:
+        - addNotNullConstraint:
+            tableName: booking
+            columnName: customer_id
+            columnDataType: INT
+
+  - changeSet:
+      id: 010-booking-list-indexes
+      author: eventticketbooking
+      comment: Support the paginated "bookings of an event" and "my bookings" queries.
+      changes:
+        - createIndex:
+            tableName: booking
+            indexName: idx_booking_event_booked_on
+            columns:
+              - column:
+                  name: event_id
+              - column:
+                  name: booked_on
+        - createIndex:
+            tableName: booking
+            indexName: idx_booking_customer_booked_on
+            columns:
+              - column:
+                  name: customer_id
+              - column:
+                  name: booked_on

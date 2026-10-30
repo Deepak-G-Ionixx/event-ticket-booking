@@ -1,4 +1,3 @@
-
 package com.ionixx.eventticketbooking.security;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -94,6 +93,32 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/bookings")
                         .hasRole(Role.CUSTOMER.name())
 
+                        // Only an ORGANISER can change or delete an event.
+                        // The service then checks that the organiser OWNS it.
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/api/events/*")
+                        .hasRole(Role.ORGANISER.name())
+                        .requestMatchers(
+                                HttpMethod.DELETE,
+                                "/api/events/*")
+                        .hasRole(Role.ORGANISER.name())
+
+                        // "My events" belongs to organisers, "my bookings" to customers.
+                        .requestMatchers(HttpMethod.GET, "/api/events/mine")
+                        .hasRole(Role.ORGANISER.name())
+                        .requestMatchers(HttpMethod.GET, "/api/bookings/mine")
+                        .hasRole(Role.CUSTOMER.name())
+
+                        // Booking lists and summaries show other people's details and
+                        // revenue, so only organisers may call them. The service then
+                        // checks that the organiser owns the event.
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/events/*/bookings",
+                                "/api/events/*/summary")
+                        .hasRole(Role.ORGANISER.name())
+
                         // All remaining endpoints require a valid JWT.
                         .anyRequest().authenticated())
 
@@ -118,7 +143,6 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager(
             AuthenticationConfiguration configuration) throws Exception {
-
         return configuration.getAuthenticationManager();
     }
 }

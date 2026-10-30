@@ -1,4 +1,5 @@
-package com.ionixx.eventticketbooking.exception;
+
+        package com.ionixx.eventticketbooking.exception;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -37,11 +38,13 @@ class GlobalExceptionHandlerTest {
     void setUp() {
         request = new MockHttpServletRequest("GET", "/api/test");
         handler = new GlobalExceptionHandler(request);
+
         MDC.put(RequestIdFilter.MDC_KEY, REQUEST_ID);
     }
 
     @AfterEach
     void clearMdc() {
+        // Prevent request IDs from leaking between tests.
         MDC.clear();
     }
 
@@ -50,6 +53,9 @@ class GlobalExceptionHandlerTest {
         // Only used to build a MethodParameter for MethodArgumentNotValidException.
     }
 
+    /**
+     * Checks the common fields returned by the exception handler.
+     */
     private static void assertError(
             ResponseEntity<ApiErrorResponse> response,
             HttpStatus status,
@@ -57,7 +63,9 @@ class GlobalExceptionHandlerTest {
             String message) {
 
         assertThat(response.getStatusCode()).isEqualTo(status);
+
         ApiErrorResponse body = response.getBody();
+
         assertThat(body).isNotNull();
         assertThat(body.status()).isEqualTo(status.value());
         assertThat(body.code()).isEqualTo(code);
@@ -65,101 +73,165 @@ class GlobalExceptionHandlerTest {
         assertThat(body.path()).isEqualTo("/api/test");
         assertThat(body.requestId()).isEqualTo(REQUEST_ID);
         assertThat(body.timestamp()).isNotNull();
+
         assertThat(response.getHeaders().getFirst(RequestIdFilter.HEADER))
                 .isEqualTo(REQUEST_ID);
     }
 
     // ------------------------------------------------------------------
-    // simple handlers
+    // Simple exception handlers
     // ------------------------------------------------------------------
 
     @Test
     void emailAlreadyRegisteredReturns409() {
-        ResponseEntity<ApiErrorResponse> response = handler.handleEmailAlreadyRegistered(
-                new EmailAlreadyRegisteredException("exists"));
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleEmailAlreadyRegistered(
+                        new EmailAlreadyRegisteredException("exists"));
 
-        assertError(response, HttpStatus.CONFLICT, "EMAIL_ALREADY_REGISTERED", "exists");
+        assertError(
+                response,
+                HttpStatus.CONFLICT,
+                "EMAIL_ALREADY_REGISTERED",
+                "exists");
+
         assertThat(response.getBody().errors()).isEmpty();
     }
 
     @Test
     void invalidEventIdReturns400() {
-        assertError(handler.handleInvalidEventId(new InvalidEventIdException()),
-                HttpStatus.BAD_REQUEST, "INVALID_EVENT_ID",
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleInvalidEventId(new InvalidEventIdException());
+
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "INVALID_EVENT_ID",
                 "Event ID must be a positive integer");
     }
 
     @Test
     void duplicateEventReturns409() {
-        assertError(handler.handleDuplicateEvent(new DuplicateEventException()),
-                HttpStatus.CONFLICT, "DUPLICATE_EVENT",
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleDuplicateEvent(new DuplicateEventException());
+
+        assertError(
+                response,
+                HttpStatus.CONFLICT,
+                "DUPLICATE_EVENT",
                 "An event with the same name and date already exists");
     }
 
     @Test
     void eventNotFoundReturns404() {
-        assertError(handler.handleEventNotFound(new EventNotFoundException(9)),
-                HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "Event not found with id: 9");
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleEventNotFound(new EventNotFoundException(9));
+
+        assertError(
+                response,
+                HttpStatus.NOT_FOUND,
+                "EVENT_NOT_FOUND",
+                "Event not found with id: 9");
     }
 
     @Test
     void invalidBookingIdReturns400() {
-        assertError(handler.handleInvalidBookingId(new InvalidBookingIdException()),
-                HttpStatus.BAD_REQUEST, "INVALID_BOOKING_ID",
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleInvalidBookingId(new InvalidBookingIdException());
+
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "INVALID_BOOKING_ID",
                 "Booking ID must be a positive integer");
     }
 
     @Test
     void bookingNotFoundReturns404() {
-        assertError(handler.handleBookingNotFound(new BookingNotFoundException(3)),
-                HttpStatus.NOT_FOUND, "BOOKING_NOT_FOUND", "Booking not found with id: 3");
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleBookingNotFound(new BookingNotFoundException(3));
+
+        assertError(
+                response,
+                HttpStatus.NOT_FOUND,
+                "BOOKING_NOT_FOUND",
+                "Booking not found with id: 3");
     }
 
     @Test
     void illegalArgumentReturns400() {
-        assertError(handler.handleIllegalArgument(new IllegalArgumentException("nope")),
-                HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "nope");
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleIllegalArgument(new IllegalArgumentException("nope"));
+
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST",
+                "nope");
     }
 
     @Test
     void unreadableBodyReturns400() {
-        ResponseEntity<ApiErrorResponse> response = handler.handleUnreadableBody(
-                mock(HttpMessageNotReadableException.class));
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleUnreadableBody(
+                        mock(HttpMessageNotReadableException.class));
 
-        assertError(response, HttpStatus.BAD_REQUEST, "INVALID_REQUEST_BODY",
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST_BODY",
                 "Request body is missing, malformed, or contains an invalid value");
     }
 
     @Test
     void accessDeniedReturns403() {
-        assertError(handler.handleAccessDenied(new AccessDeniedException("denied")),
-                HttpStatus.FORBIDDEN, "FORBIDDEN",
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleAccessDenied(new AccessDeniedException("denied"));
+
+        assertError(
+                response,
+                HttpStatus.FORBIDDEN,
+                "FORBIDDEN",
                 "You do not have permission to perform this action");
     }
 
     @Test
     void unexpectedErrorReturns500WithoutLeakingDetails() {
         ResponseEntity<ApiErrorResponse> response =
-                handler.handleUnexpected(new IllegalStateException("secret internals"));
+                handler.handleUnexpected(
+                        new IllegalStateException("secret internals"));
 
-        assertError(response, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR",
+        assertError(
+                response,
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
                 "An unexpected error occurred");
+
         assertThat(response.getBody().message()).doesNotContain("secret");
     }
 
     // ------------------------------------------------------------------
-    // handlers that add field errors
+    // Handlers that add field errors
     // ------------------------------------------------------------------
 
     @Test
     void invalidBookingRequestReturnsFieldError() {
-        ResponseEntity<ApiErrorResponse> response = handler.handleInvalidBookingRequest(
-                new InvalidBookingRequestException("seat_numbers", "Duplicate seat numbers"));
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleInvalidBookingRequest(
+                        new InvalidBookingRequestException(
+                                "seat_numbers",
+                                "Duplicate seat numbers"));
 
-        assertError(response, HttpStatus.BAD_REQUEST, "INVALID_BOOKING_REQUEST",
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "INVALID_BOOKING_REQUEST",
                 "Booking request is invalid");
+
         assertThat(response.getBody().errors()).hasSize(1);
-        ApiErrorResponse.FieldError error = response.getBody().errors().get(0);
+
+        ApiErrorResponse.FieldError error =
+                response.getBody().errors().get(0);
+
         assertThat(error.field()).isEqualTo("seat_numbers");
         assertThat(error.rejectedValue()).isNull();
         assertThat(error.message()).isEqualTo("Duplicate seat numbers");
@@ -170,9 +242,15 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ApiErrorResponse> response =
                 handler.handleSeatOutOfRange(new SeatOutOfRangeException(99));
 
-        assertError(response, HttpStatus.BAD_REQUEST, "SEAT_OUT_OF_RANGE",
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "SEAT_OUT_OF_RANGE",
                 "seat 99 does not exist for this event");
-        ApiErrorResponse.FieldError error = response.getBody().errors().get(0);
+
+        ApiErrorResponse.FieldError error =
+                response.getBody().errors().get(0);
+
         assertThat(error.field()).isEqualTo("seat_numbers");
         assertThat(error.rejectedValue()).isEqualTo(99);
     }
@@ -181,61 +259,94 @@ class GlobalExceptionHandlerTest {
     void validationFailureListsFieldAndGlobalErrors() throws Exception {
         BeanPropertyBindingResult bindingResult =
                 new BeanPropertyBindingResult(new Object(), "target");
+
         bindingResult.addError(
-                new FieldError("target", "name", "x", false, null, null, "name is too short"));
-        bindingResult.addError(new ObjectError("target", "object-level problem"));
+                new FieldError(
+                        "target",
+                        "name",
+                        "x",
+                        false,
+                        null,
+                        null,
+                        "name is too short"));
+
+        bindingResult.addError(
+                new ObjectError("target", "object-level problem"));
 
         Method method = GlobalExceptionHandlerTest.class
                 .getDeclaredMethod("sampleHandlerMethod", String.class);
-        MethodArgumentNotValidException exception = new MethodArgumentNotValidException(
-                new MethodParameter(method, 0), bindingResult);
+
+        MethodArgumentNotValidException exception =
+                new MethodArgumentNotValidException(
+                        new MethodParameter(method, 0),
+                        bindingResult);
 
         ResponseEntity<ApiErrorResponse> response =
                 handler.handleValidationErrors(exception);
 
-        assertError(response, HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+        assertError(
+                response,
+                HttpStatus.BAD_REQUEST,
+                "VALIDATION_FAILED",
                 "Request has 2 invalid field(s)");
+
         assertThat(response.getBody().errors()).hasSize(2);
 
-        ApiErrorResponse.FieldError fieldError = response.getBody().errors().get(0);
+        ApiErrorResponse.FieldError fieldError =
+                response.getBody().errors().get(0);
+
         assertThat(fieldError.field()).isEqualTo("name");
         assertThat(fieldError.rejectedValue()).isEqualTo("x");
         assertThat(fieldError.message()).isEqualTo("name is too short");
 
-        ApiErrorResponse.FieldError globalError = response.getBody().errors().get(1);
+        ApiErrorResponse.FieldError globalError =
+                response.getBody().errors().get(1);
+
         assertThat(globalError.field()).isEqualTo("target");
         assertThat(globalError.rejectedValue()).isNull();
         assertThat(globalError.message()).isEqualTo("object-level problem");
     }
 
     // ------------------------------------------------------------------
-    // authentication
+    // Authentication exception handlers
     // ------------------------------------------------------------------
 
     @Test
     void badCredentialsReturns401WithBearerChallenge() {
         ResponseEntity<ApiErrorResponse> response =
-                handler.handleAuthentication(new BadCredentialsException("bad"));
+                handler.handleAuthentication(
+                        new BadCredentialsException("bad"));
 
-        assertError(response, HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",
+        assertError(
+                response,
+                HttpStatus.UNAUTHORIZED,
+                "INVALID_CREDENTIALS",
                 "Invalid email or password");
-        assertThat(response.getHeaders().getFirst(HttpHeaders.WWW_AUTHENTICATE))
+
+        assertThat(
+                response.getHeaders().getFirst(HttpHeaders.WWW_AUTHENTICATE))
                 .isEqualTo("Bearer");
     }
 
     @Test
     void otherAuthenticationErrorsReturnGenericUnauthorized() {
-        ResponseEntity<ApiErrorResponse> response = handler.handleAuthentication(
-                new InsufficientAuthenticationException("need login"));
+        ResponseEntity<ApiErrorResponse> response =
+                handler.handleAuthentication(
+                        new InsufficientAuthenticationException("need login"));
 
-        assertError(response, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED",
+        assertError(
+                response,
+                HttpStatus.UNAUTHORIZED,
+                "UNAUTHORIZED",
                 "Authentication is required to access this resource");
-        assertThat(response.getHeaders().getFirst(HttpHeaders.WWW_AUTHENTICATE))
+
+        assertThat(
+                response.getHeaders().getFirst(HttpHeaders.WWW_AUTHENTICATE))
                 .isEqualTo("Bearer");
     }
 
     // ------------------------------------------------------------------
-    // request id resolution
+    // Request ID resolution
     // ------------------------------------------------------------------
 
     @Test
@@ -247,6 +358,7 @@ class GlobalExceptionHandlerTest {
                 handler.handleInvalidEventId(new InvalidEventIdException());
 
         assertThat(response.getBody().requestId()).isEqualTo("ATTR-ID-0001");
+
         assertThat(response.getHeaders().getFirst(RequestIdFilter.HEADER))
                 .isEqualTo("ATTR-ID-0001");
     }

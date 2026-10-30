@@ -118,7 +118,7 @@ tasks.jacocoTestReport {
     }
 }
 
-// Fail the verification task if overall line coverage is below 80%.
+// Fail the verification task if overall line coverage is below 90%.
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
 
@@ -129,7 +129,7 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.80".toBigDecimal()
+                minimum = "0.90".toBigDecimal()
             }
         }
     }
