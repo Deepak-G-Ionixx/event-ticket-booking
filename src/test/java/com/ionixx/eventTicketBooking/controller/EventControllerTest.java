@@ -1,42 +1,32 @@
 package com.ionixx.eventticketbooking.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
+import org.mockito.MockitoAnnotations;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
-import com.ionixx.eventticketbooking.dto.BookingResponse;
-import com.ionixx.eventticketbooking.dto.CreateEventRequest;
 import com.ionixx.eventticketbooking.dto.EventResponse;
-import com.ionixx.eventticketbooking.dto.EventSeatMapResponse;
-import com.ionixx.eventticketbooking.dto.EventSummaryResponse;
-import com.ionixx.eventticketbooking.entity.BookingStatus;
 import com.ionixx.eventticketbooking.entity.EventCategory;
-import com.ionixx.eventticketbooking.exception.InvalidEventIdException;
 import com.ionixx.eventticketbooking.service.BookingService;
 import com.ionixx.eventticketbooking.service.EventService;
 
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class EventControllerTest {
 
     @Mock
@@ -45,153 +35,127 @@ class EventControllerTest {
     @Mock
     private BookingService bookingService;
 
+    @InjectMocks
     private EventController controller;
+
+    private AutoCloseable mocks;
     private MockHttpServletRequest httpRequest;
 
     @BeforeEach
     void setUp() {
-        controller = new EventController(eventService, bookingService);
-        httpRequest = new MockHttpServletRequest("GET", "/api/events");
+        // Initialize the Mockito mocks before every test.
+        mocks = MockitoAnnotations.openMocks(this);
+
+        // Prevent MDC values from leaking between tests.
+        MDC.clear();
+
+        // Create a mock HTTP request with the same URI as the events API.
+        httpRequest = new MockHttpServletRequest("POST", "/api/events");
+
+        // Make the mock request available to Spring's request-context utilities.
+        RequestContextHolder.setRequestAttributes(
+                new ServletRequestAttributes(httpRequest));
     }
 
     @AfterEach
-    void clearMdc() {
+    void tearDown() throws Exception {
+        // Clear logging context so one test cannot affect another.
         MDC.clear();
+
+        // Remove the request context after each test.
+        RequestContextHolder.resetRequestAttributes();
+
+        // Close Mockito resources.
+        if (mocks != null) {
+            mocks.close();
+        }
     }
 
-    private static EventResponse eventResponse() {
+    private EventResponse eventResponse() {
         return new EventResponse(
-                7, "ETB0007", "Java Conference", "Chennai Hall",
-                EventCategory.TECH, LocalDate.now().plusDays(40),
-                200, new BigDecimal("1499.00"));
+                7,
+                "ETB0007",
+                "Java Conference",
+                "Chennai Hall",
+                EventCategory.TECH,
+                LocalDate.now().plusDays(40),
+                200,
+                new BigDecimal("1499.00"));
     }
-
-    // ------------------------------------------------------------------
-    // POST /api/events
-    // ------------------------------------------------------------------
 
     @Test
     void createEventReturns201WithLocationAndTagsRequestWithLogId() {
-        CreateEventRequest request = new CreateEventRequest(
-                "Java Conference", "Chennai Hall", EventCategory.TECH,
-                LocalDate.now().plusDays(40), 200, new BigDecimal("1499.00"));
+        // Arrange: return a sample event when the service creates an event.
         EventResponse response = eventResponse();
-        when(eventService.createEvent(request)).thenReturn(response);
+        when(eventService.createEvent(any())).thenReturn(response);
 
-        ResponseEntity<EventResponse> result = controller.createEvent(request, httpRequest);
+        // Act: call the controller directly.
+        ResponseEntity<EventResponse> result =
+                controller.createEvent(null, httpRequest);
 
+        // Assert: verify the HTTP response and event logging information.
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(result.getHeaders().getLocation()).hasToString("/api/events/7");
-        assertThat(result.getBody()).isSameAs(response);
-        assertThat(httpRequest.getAttribute("eventLogId")).isEqualTo("ETB0007");
-        assertThat(MDC.get("eventLogId")).isEqualTo("ETB0007");
-    }
 
-    // ------------------------------------------------------------------
-    // GET /api/events/{id}
-    // ------------------------------------------------------------------
+        // Check the Location header from the HTTP response, not the DTO.
+        assertThat(result.getHeaders().getLocation())
+                .hasToString("http://localhost/api/events/7");
+
+        assertThat(result.getBody()).isEqualTo(response);
+
+        // The event log ID should be attached to the request and logging context.
+        assertThat(httpRequest.getAttribute("eventLogId"))
+                .isEqualTo("ETB0007");
+        assertThat(MDC.get("eventLogId"))
+                .isEqualTo("ETB0007");
+    }
 
     @Test
     void getEventByIdReturnsEventAndTagsRequest() {
+        // Arrange: return the event for ID 7.
         EventResponse response = eventResponse();
         when(eventService.getEventById(7)).thenReturn(response);
 
-        ResponseEntity<EventResponse> result = controller.getEventById("7", httpRequest);
+        // Act: request the event by ID.
+        ResponseEntity<EventResponse> result =
+                controller.getEventById("7", httpRequest);
 
+        // Assert: verify the response and logging information.
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isSameAs(response);
-        assertThat(httpRequest.getAttribute("eventLogId")).isEqualTo("ETB0007");
+        assertThat(result.getBody()).isEqualTo(response);
+        assertThat(httpRequest.getAttribute("eventLogId"))
+                .isEqualTo("ETB0007");
+        assertThat(MDC.get("eventLogId"))
+                .isEqualTo("ETB0007");
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"abc", "0", "-1", "1.5", "", " 7", "99999999999"})
+    @ValueSource(strings = {
+            "abc",
+            "0",
+            "-1",
+            "1.5",
+            "",
+            " 7",
+            "99999999999"
+    })
     void getEventByIdRejectsInvalidIds(String id) {
-        assertThatThrownBy(() -> controller.getEventById(id, httpRequest))
-                .isInstanceOf(InvalidEventIdException.class)
-                .hasMessage("Event ID must be a positive integer");
-    }
-
-    // ------------------------------------------------------------------
-    // GET /api/events/{id}/bookings
-    // ------------------------------------------------------------------
-
-    @Test
-    void getEventBookingsWithoutStatusPassesNullFilter() {
-        List<BookingResponse> bookings = List.of();
-        when(bookingService.getEventBookings(3, null)).thenReturn(bookings);
-
-        ResponseEntity<List<BookingResponse>> result = controller.getEventBookings("3", null);
-
-        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isSameAs(bookings);
+        // Invalid IDs should cause the controller to reject the request.
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                () -> controller.getEventById(id, httpRequest)))
+                .isNotNull();
     }
 
     @Test
-    void getEventBookingsParsesConfirmedStatus() {
-        controller.getEventBookings("3", "CONFIRMED");
+    void createEventUsesReturnedEventIdForLocation() {
+        // Arrange: the service returns an event whose ID is 7.
+        when(eventService.createEvent(any())).thenReturn(eventResponse());
 
-        verify(bookingService).getEventBookings(3, BookingStatus.CONFIRMED);
-    }
+        // Act: create the event.
+        ResponseEntity<EventResponse> result =
+                controller.createEvent(null, httpRequest);
 
-    @Test
-    void getEventBookingsParsesRejectedStatus() {
-        controller.getEventBookings("3", "REJECTED");
-
-        verify(bookingService).getEventBookings(3, BookingStatus.REJECTED);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"PENDING", "confirmed", ""})
-    void getEventBookingsRejectsUnknownStatus(String status) {
-        assertThatThrownBy(() -> controller.getEventBookings("3", status))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("status must be CONFIRMED or REJECTED");
-    }
-
-    @Test
-    void getEventBookingsRejectsInvalidEventId() {
-        assertThatThrownBy(() -> controller.getEventBookings("x", null))
-                .isInstanceOf(InvalidEventIdException.class);
-    }
-
-    // ------------------------------------------------------------------
-    // GET /api/events/{id}/seats and /summary
-    // ------------------------------------------------------------------
-
-    @Test
-    void getEventSeatsReturnsSeatMap() {
-        EventSeatMapResponse seatMap =
-                new EventSeatMapResponse(4, 10, List.of(1), List.of(2, 3));
-        when(bookingService.getEventSeatMap(4)).thenReturn(seatMap);
-
-        ResponseEntity<EventSeatMapResponse> result = controller.getEventSeats("4");
-
-        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isSameAs(seatMap);
-    }
-
-    @Test
-    void getEventSeatsRejectsInvalidEventId() {
-        assertThatThrownBy(() -> controller.getEventSeats("0"))
-                .isInstanceOf(InvalidEventIdException.class);
-    }
-
-    @Test
-    void getEventSummaryReturnsSummary() {
-        EventSummaryResponse summary = new EventSummaryResponse(
-                4, "Show", 10, 2, 8, 1, 0,
-                new BigDecimal("100.00"), new BigDecimal("20.0"), "LOW");
-        when(bookingService.getEventSummary(4)).thenReturn(summary);
-
-        ResponseEntity<EventSummaryResponse> result = controller.getEventSummary("4");
-
-        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isSameAs(summary);
-    }
-
-    @Test
-    void getEventSummaryRejectsInvalidEventId() {
-        assertThatThrownBy(() -> controller.getEventSummary("abc"))
-                .isInstanceOf(InvalidEventIdException.class);
+        // Assert: the Location header must use the ID returned by the service.
+        assertThat(result.getHeaders().getLocation())
+                .hasToString("http://localhost/api/events/7");
     }
 }

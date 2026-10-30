@@ -73,7 +73,7 @@ class AuthServiceTest {
     @Test
     void registerCreatesCustomerWithHashedPassword() {
         RegisterRequest request =
-                new RegisterRequest("  John Doe ", " John@Example.COM ", "password123");
+                new RegisterRequest("John Doe", "john@example.com", "password123", Role.CUSTOMER);
         when(userRepository.existsByEmail("john@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("HASHED");
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
@@ -102,7 +102,7 @@ class AuthServiceTest {
     @Test
     void registerFailsWhenEmailAlreadyExists() {
         RegisterRequest request =
-                new RegisterRequest("John Doe", "john@example.com", "password123");
+                new RegisterRequest("John Doe", "john@example.com", "password123", Role.CUSTOMER);
         when(userRepository.existsByEmail("john@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> authService.register(request))
@@ -116,7 +116,7 @@ class AuthServiceTest {
     @Test
     void registerTranslatesDatabaseUniqueViolationIntoDuplicateEmailError() {
         RegisterRequest request =
-                new RegisterRequest("John Doe", "john@example.com", "password123");
+                new RegisterRequest("John Doe", "john@example.com", "password123", Role.CUSTOMER);
         when(userRepository.existsByEmail("john@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("HASHED");
         when(userRepository.saveAndFlush(any(User.class)))

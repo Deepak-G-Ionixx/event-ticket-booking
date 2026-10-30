@@ -24,3 +24,15 @@ databaseChangeLog:
 
   - include:
       file: db/changelog/changes/007-create-password-reset-tokens.yaml
+
+  - include:
+      file: db/changelog/changes/008-add-ownership-columns.yaml
+
+  - include:
+      file: db/changelog/changes/009-create-booking-seat.yaml
+
+  - include:
+      file: db/changelog/changes/010-enforce-ownership-and-booking-indexes.yaml
+
+  - include:
+      file: db/changelog/changes/011-booking-seat-event-consistency.yaml

@@ -18,9 +18,11 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.ionixx.eventticketbooking.dto.ApiErrorResponse;
 import com.ionixx.eventticketbooking.filter.RequestIdFilter;
+
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
@@ -31,21 +33,8 @@ public class GlobalExceptionHandler {
 
     private final HttpServletRequest httpServletRequest;
 
-    public GlobalExceptionHandler(
-            HttpServletRequest httpServletRequest) {
+    public GlobalExceptionHandler(HttpServletRequest httpServletRequest) {
         this.httpServletRequest = httpServletRequest;
-    }
-    // Returns 409 when a registration request uses an existing email.
-    @ExceptionHandler(EmailAlreadyRegisteredException.class)
-    public ResponseEntity<ApiErrorResponse> handleEmailAlreadyRegistered(
-            EmailAlreadyRegisteredException exception) {
-
-        return buildResponse(
-                HttpStatus.CONFLICT,
-                "EMAIL_ALREADY_REGISTERED",
-                exception.getMessage(),
-                List.of()
-        );
     }
 
     // Handles @Valid request DTO validation failures.
@@ -92,7 +81,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Existing event handlers.
+    // Handles invalid event IDs.
     @ExceptionHandler(InvalidEventIdException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidEventId(
             InvalidEventIdException exception) {
@@ -105,6 +94,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Handles duplicate events.
     @ExceptionHandler(DuplicateEventException.class)
     public ResponseEntity<ApiErrorResponse> handleDuplicateEvent(
             DuplicateEventException exception) {
@@ -117,6 +107,20 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Handles deleting an event that already has bookings.
+    @ExceptionHandler(EventHasBookingsException.class)
+    public ResponseEntity<ApiErrorResponse> handleEventHasBookings(
+            EventHasBookingsException exception) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "EVENT_HAS_BOOKINGS",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
+    // Handles events that do not exist.
     @ExceptionHandler(EventNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleEventNotFound(
             EventNotFoundException exception) {
@@ -129,7 +133,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Booking ID is not numeric or is less than or equal to zero.
+    // Handles invalid booking IDs.
     @ExceptionHandler(InvalidBookingIdException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidBookingId(
             InvalidBookingIdException exception) {
@@ -142,7 +146,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // The requested booking does not exist.
+    // Handles bookings that do not exist.
     @ExceptionHandler(BookingNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleBookingNotFound(
             BookingNotFoundException exception) {
@@ -155,7 +159,8 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Business validation failures, such as duplicate seat numbers.
+    // Handles invalid booking requests, such as duplicate seat numbers
+    // within the same request.
     @ExceptionHandler(InvalidBookingRequestException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidBookingRequest(
             InvalidBookingRequestException exception) {
@@ -176,7 +181,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // A seat number is larger than the event's total_seats.
+    // Handles seat numbers greater than the event's total seat count.
     @ExceptionHandler(SeatOutOfRangeException.class)
     public ResponseEntity<ApiErrorResponse> handleSeatOutOfRange(
             SeatOutOfRangeException exception) {
@@ -197,7 +202,40 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Preserves the existing handling of other bad arguments.
+    // Handles a seat already reserved by another confirmed booking.
+    // PostgreSQL's unique constraint protects against concurrent requests.
+    @ExceptionHandler(SeatAlreadyBookedException.class)
+    public ResponseEntity<ApiErrorResponse> handleSeatAlreadyBooked(
+            SeatAlreadyBookedException exception) {
+
+        log.warn(
+                "Seat reservation conflict: requestId={}, path={}",
+                getRequestId(),
+                httpServletRequest.getRequestURI()
+        );
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "SEAT_ALREADY_BOOKED",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
+    // Handles a query parameter of the wrong type, for example page=abc.
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleTypeMismatch(
+            MethodArgumentTypeMismatchException exception) {
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST",
+                "Parameter '" + exception.getName() + "' has an invalid value",
+                List.of()
+        );
+    }
+
+    // Preserves handling of other invalid arguments.
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
             IllegalArgumentException exception) {
@@ -210,14 +248,14 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // 401: wrong email/password on POST /auth/login (or any AuthenticationException
-    // thrown from a controller). Failures inside the security filter chain are handled
-    // by RestAuthenticationEntryPoint instead.
+    // Handles authentication failures raised inside controller processing.
+    // Failures inside the security filter chain use RestAuthenticationEntryPoint.
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiErrorResponse> handleAuthentication(
             AuthenticationException exception) {
 
-        boolean badCredentials = exception instanceof BadCredentialsException;
+        boolean badCredentials =
+                exception instanceof BadCredentialsException;
 
         return buildResponse(
                 HttpStatus.UNAUTHORIZED,
@@ -230,9 +268,38 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // 403: authenticated, but not allowed. Without this handler, an AccessDeniedException
-    // thrown from a controller (for example by a future @PreAuthorize) would be caught
-    // by the catch-all below and turned into a 500.
+    /**
+     * Handles attempts to register an email address that already exists.
+     * Returns HTTP 409 Conflict.
+     */
+    @ExceptionHandler(EmailAlreadyRegisteredException.class)
+    public ResponseEntity<ApiErrorResponse> handleEmailAlreadyRegistered(
+            EmailAlreadyRegisteredException exception) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "EMAIL_ALREADY_REGISTERED",
+                exception.getMessage(),
+                List.of());
+    }
+
+    /**
+     * Handles attempts to access a resource owned by another user.
+     * Returns HTTP 403 Forbidden because the user is authenticated
+     * but does not have permission to access this resource.
+     */
+    @ExceptionHandler(ResourceAccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleResourceAccessDenied(
+            ResourceAccessDeniedException exception) {
+
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                "RESOURCE_ACCESS_DENIED",
+                "You are not allowed to access this resource",
+                List.of());
+    }
+
+    // Handles authenticated users who are not permitted to perform an action.
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiErrorResponse> handleAccessDenied(
             AccessDeniedException exception) {
@@ -245,7 +312,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Catch-all: logs the real exception but avoids exposing internals.
+    // Logs unexpected errors internally without exposing implementation details.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception exception) {
@@ -264,7 +331,7 @@ public class GlobalExceptionHandler {
         );
     }
 
-    // Builds the consistent API error response used throughout the app.
+    // Builds the consistent API error response used throughout the application.
     private ResponseEntity<ApiErrorResponse> buildResponse(
             HttpStatus status,
             String code,
@@ -274,6 +341,7 @@ public class GlobalExceptionHandler {
         return buildResponse(status, code, message, errors, null);
     }
 
+    // Optionally adds the WWW-Authenticate header for authentication failures.
     private ResponseEntity<ApiErrorResponse> buildResponse(
             HttpStatus status,
             String code,
@@ -293,8 +361,12 @@ public class GlobalExceptionHandler {
                 errors
         );
 
-        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status)
-                .header(RequestIdFilter.HEADER, requestId);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status);
+
+        // Include the same request ID in the response header and error body.
+        if (requestId != null && !requestId.isBlank()) {
+            builder.header(RequestIdFilter.HEADER, requestId);
+        }
 
         if (wwwAuthenticate != null) {
             builder.header(HttpHeaders.WWW_AUTHENTICATE, wwwAuthenticate);
@@ -303,6 +375,7 @@ public class GlobalExceptionHandler {
         return builder.body(body);
     }
 
+    // Gets the request ID from MDC, falling back to the servlet request attribute.
     private String getRequestId() {
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
 

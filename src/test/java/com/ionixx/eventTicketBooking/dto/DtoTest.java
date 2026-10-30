@@ -1,3 +1,4 @@
+
 package com.ionixx.eventticketbooking.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -12,6 +13,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.ionixx.eventticketbooking.entity.EventCategory;
+import com.ionixx.eventticketbooking.entity.Role;
 
 class DtoTest {
 
@@ -86,23 +88,28 @@ class DtoTest {
     @Test
     void registerRequestNormalisesAndMasksPassword() {
         RegisterRequest request =
-                new RegisterRequest("  John Doe ", " JOHN@Example.com ", "supersecret");
+                new RegisterRequest(
+                        "  John Doe ", " JOHN@Example.com ", "supersecret", Role.ORGANISER);
 
         assertThat(request.name()).isEqualTo("John Doe");
         assertThat(request.email()).isEqualTo("john@example.com");
         assertThat(request.password()).isEqualTo("supersecret");
+        assertThat(request.role()).isEqualTo(Role.ORGANISER);
         assertThat(request).hasToString(
-                "RegisterRequest[name=John Doe, email=john@example.com, password=***]");
+                "RegisterRequest[name=John Doe, email=john@example.com, "
+                        + "password=***, role=ORGANISER]");
         assertThat(request.toString()).doesNotContain("supersecret");
     }
 
     @Test
     void registerRequestAllowsNullValues() {
-        RegisterRequest request = new RegisterRequest(null, null, null);
+        RegisterRequest request = new RegisterRequest(null, null, null, null);
 
         assertThat(request.name()).isNull();
         assertThat(request.email()).isNull();
         assertThat(request.password()).isNull();
+        // No role given means a normal customer account.
+        assertThat(request.role()).isEqualTo(Role.CUSTOMER);
     }
 
     @Test

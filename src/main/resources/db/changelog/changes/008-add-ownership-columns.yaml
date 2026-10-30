@@ -1,0 +1,50 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-add-ownership-columns
+      author: eventticketbooking
+      comment: Record which organiser owns each event and which customer made each booking.
+      changes:
+        # Every new event belongs to the organiser who created it.
+        # Existing events keep a NULL owner (no organiser can manage them through the API).
+        - addColumn:
+            tableName: event
+            columns:
+              - column:
+                  name: organiser_id
+                  type: INT
+
+        - addForeignKeyConstraint:
+            baseTableName: event
+            baseColumnNames: organiser_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_event_organiser
+
+        - createIndex:
+            tableName: event
+            indexName: idx_event_organiser
+            columns:
+              - column:
+                  name: organiser_id
+
+        # Every new booking belongs to the customer who made it.
+        - addColumn:
+            tableName: booking
+            columns:
+              - column:
+                  name: customer_id
+                  type: INT
+
+        - addForeignKeyConstraint:
+            baseTableName: booking
+            baseColumnNames: customer_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_booking_customer
+
+        - createIndex:
+            tableName: booking
+            indexName: idx_booking_customer
+            columns:
+              - column:
+                  name: customer_id

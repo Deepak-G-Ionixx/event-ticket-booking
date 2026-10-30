@@ -55,6 +55,11 @@ public class Booking {
     @Column(name = "booked_on", nullable = false)
     private LocalDate bookedOn;
 
+    // The customer (users.id) who made this booking. Null only for bookings created
+    // before ownership was introduced.
+    @Column(name = "customer_id")
+    private Integer customerId;
+
     protected Booking() {
         // Required by JPA.
     }
@@ -69,6 +74,22 @@ public class Booking {
             String rejectionReason,
             LocalDate bookedOn) {
 
+        this(event, customerName, customerEmail, seatNumbers, seats,
+                status, rejectionReason, bookedOn, null);
+    }
+
+    public Booking(
+            Event event,
+            String customerName,
+            String customerEmail,
+            String seatNumbers,
+            Integer seats,
+            BookingStatus status,
+            String rejectionReason,
+            LocalDate bookedOn,
+            Integer customerId) {
+
+        this.customerId = customerId;
         this.event = event;
         this.customerName = customerName;
         this.customerEmail = customerEmail;
@@ -138,5 +159,9 @@ public class Booking {
 
     public LocalDate getBookedOn() {
         return bookedOn;
+    }
+
+    public Integer getCustomerId() {
+        return customerId;
     }
 }

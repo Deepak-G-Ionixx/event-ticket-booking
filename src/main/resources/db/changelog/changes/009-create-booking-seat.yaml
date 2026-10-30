@@ -1,0 +1,76 @@
+databaseChangeLog:
+  - changeSet:
+      id: 009-create-booking-seat
+      author: eventticketbooking
+
+      changes:
+        # Create a table to store the individual seats belonging to each booking.
+        - createTable:
+            tableName: booking_seat
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_booking_seat
+                    nullable: false
+
+              - column:
+                  name: event_id
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: booking_id
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+
+              - column:
+                  name: seat_number
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+
+        # Link every seat to its event.
+        - addForeignKeyConstraint:
+            baseTableName: booking_seat
+            baseColumnNames: event_id
+            constraintName: fk_booking_seat_event
+            referencedTableName: event
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+        # Link every seat to its booking.
+        - addForeignKeyConstraint:
+            baseTableName: booking_seat
+            baseColumnNames: booking_id
+            constraintName: fk_booking_seat_booking
+            referencedTableName: booking
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+        # Prevent the same seat from being booked twice for one event.
+        - addUniqueConstraint:
+            tableName: booking_seat
+            columnNames: event_id, seat_number
+            constraintName: uk_event_seat_number
+
+        # Create a database check constraint using PostgreSQL SQL.
+        - sql:
+            dbms: postgresql
+            sql: >
+              ALTER TABLE booking_seat
+              ADD CONSTRAINT ck_booking_seat_number_positive
+              CHECK (seat_number > 0);
+
+        # Speed up searches for seats belonging to a booking.
+        - createIndex:
+            tableName: booking_seat
+            indexName: idx_booking_seat_booking_id
+            columns:
+              - column:
+                  name: booking_id

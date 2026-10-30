@@ -1,17 +1,18 @@
-
 package com.ionixx.eventticketbooking.dto;
 
 import java.util.Locale;
+
+import com.ionixx.eventticketbooking.entity.Role;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * Request body used when a new customer registers.
+ * Request body used when a new user registers.
  *
- * The client cannot choose a role. The server assigns CUSTOMER
- * when creating the user.
+ * role is optional: "CUSTOMER" or "ORGANISER". When it is left out, the account
+ * is created as a CUSTOMER. Any other value is rejected with 400.
  */
 public record RegisterRequest(
 
@@ -26,7 +27,9 @@ public record RegisterRequest(
 
         @NotBlank(message = "password is required")
         @Size(min = 8, max = 72, message = "password must contain 8 to 72 characters")
-        String password
+        String password,
+
+        Role role
 ) {
     public RegisterRequest {
         // Normalize email so Deepak@Example.com and deepak@example.com
@@ -39,6 +42,11 @@ public record RegisterRequest(
         if (name != null) {
             name = name.trim();
         }
+
+        // Leaving the role out means a normal customer account.
+        if (role == null) {
+            role = Role.CUSTOMER;
+        }
     }
 
     // Avoid exposing the raw password if this request is ever logged.
@@ -46,6 +54,7 @@ public record RegisterRequest(
     public String toString() {
         return "RegisterRequest[name=" + name
                 + ", email=" + email
-                + ", password=***]";
+                + ", password=***"
+                + ", role=" + role + "]";
     }
 }

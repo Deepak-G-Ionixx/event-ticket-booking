@@ -1,0 +1,50 @@
+databaseChangeLog:
+  - changeSet:
+      id: 011-booking-seat-matches-booking-event
+      author: eventticketbooking
+      comment: >
+        A reserved seat must belong to the same event as its booking.
+        booking_seat stores event_id (needed for the unique seat constraint)
+        and booking_id separately, so without this composite foreign key the
+        two could disagree. The precondition stops the migration instead of
+        silently "fixing" rows if inconsistent data already exists.
+      preConditions:
+        - onFail: HALT
+          onFailMessage: >
+            booking_seat contains rows whose event_id differs from the event of
+            their booking. Correct or remove those rows, then restart.
+        - sqlCheck:
+            expectedResult: 0
+            sql: >
+              SELECT COUNT(*)
+              FROM booking_seat bs
+              JOIN booking b ON b.id = bs.booking_id
+              WHERE b.event_id <> bs.event_id
+      changes:
+        # Target for the composite foreign key below.
+        - addUniqueConstraint:
+            tableName: booking
+            columnNames: id, event_id
+            constraintName: uk_booking_id_event
+
+        - addForeignKeyConstraint:
+            baseTableName: booking_seat
+            baseColumnNames: booking_id, event_id
+            referencedTableName: booking
+            referencedColumnNames: id, event_id
+            constraintName: fk_booking_seat_booking_event
+            onDelete: CASCADE
+
+  - changeSet:
+      id: 011-event-organiser-date-index
+      author: eventticketbooking
+      comment: Supports the paginated "my events" query (owner filter + default sort by date).
+      changes:
+        - createIndex:
+            tableName: event
+            indexName: idx_event_organiser_event_date
+            columns:
+              - column:
+                  name: organiser_id
+              - column:
+                  name: event_date

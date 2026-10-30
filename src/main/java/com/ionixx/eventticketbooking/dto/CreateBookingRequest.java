@@ -15,6 +15,16 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+/**
+ * Request body for POST /api/bookings.
+ *
+ * There is deliberately no customer id field. The booking always belongs to
+ * the logged-in customer, and the stored email is the email of that account.
+ *
+ * customer_email is optional and kept only for backward compatibility with
+ * existing clients. If it is sent, it must be a valid email address, but it
+ * is never used to decide who owns the booking.
+ */
 public record CreateBookingRequest(
 
         @JsonProperty("event_id")
@@ -31,7 +41,6 @@ public record CreateBookingRequest(
         String customerName,
 
         @JsonProperty("customer_email")
-        @NotBlank(message = "customer_email is required")
         @Email(message = "customer_email must be a valid email address")
         @Size(max = 254,
                 message = "customer_email must not exceed 254 characters")

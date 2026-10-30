@@ -36,13 +36,15 @@ class RoleAccessIntegrationTest extends AbstractIntegrationTest {
                 "customer_email", "role-test@example.com",
                 "seat_numbers", List.of(1, 2));
     }
-
     private int createEventAsOrganiser() {
-        ApiResult result = post("/api/events", tokenFor(Role.ORGANISER), eventRequest());
+        return createEventAs(tokenFor(Role.ORGANISER));
+    }
+
+    private int createEventAs(String organiserToken) {
+        ApiResult result = post("/api/events", organiserToken, eventRequest());
         assertThat(result.status()).isEqualTo(201);
         return result.body().path("id").asInt();
     }
-
     // ---- POST /api/events : ORGANISER only --------------------------------
 
     @Test
@@ -101,30 +103,34 @@ class RoleAccessIntegrationTest extends AbstractIntegrationTest {
 
     // ---- Read endpoints : any logged-in user ------------------------------
 
+    // ---- Read endpoints : role + ownership --------------------------------
+
     @Test
-    void anyAuthenticatedRoleCanReadEventEndpoints() {
-        int eventId = createEventAsOrganiser();
+    void owningOrganiserCanReadEveryEventEndpoint() {
+        String token = tokenFor(Role.ORGANISER);
+        int eventId = createEventAs(token);
 
-        for (Role role : Role.values()) {
-            String token = tokenFor(role);
-
-            assertThat(get("/api/events/" + eventId, token).status()).isEqualTo(200);
-            assertThat(get("/api/events/" + eventId + "/seats", token).status())
-                    .isEqualTo(200);
-            assertThat(get("/api/events/" + eventId + "/summary", token).status())
-                    .isEqualTo(200);
-            assertThat(get("/api/events/" + eventId + "/bookings", token).status())
-                    .isEqualTo(200);
-        }
+        assertThat(get("/api/events/" + eventId, token).status()).isEqualTo(200);
+        assertThat(get("/api/events/" + eventId + "/seats", token).status())
+                .isEqualTo(200);
+        assertThat(get("/api/events/" + eventId + "/summary", token).status())
+                .isEqualTo(200);
+        assertThat(get("/api/events/" + eventId + "/bookings", token).status())
+                .isEqualTo(200);
     }
 
     @Test
-    void anonymousCannotReadEventEndpoints() {
-        assertThat(get("/api/events/1", null).status()).isEqualTo(401);
-        assertThat(get("/api/events/1/seats", null).status()).isEqualTo(401);
-        assertThat(get("/api/events/1/summary", null).status()).isEqualTo(401);
-        assertThat(get("/api/events/1/bookings", null).status()).isEqualTo(401);
-        assertThat(get("/api/bookings/1", null).status()).isEqualTo(401);
+    void customerCanBrowseEventAndSeatsButNotBookingsOrSummary() {
+        int eventId = createEventAsOrganiser();
+        String token = tokenFor(Role.CUSTOMER);
+
+        assertThat(get("/api/events/" + eventId, token).status()).isEqualTo(200);
+        assertThat(get("/api/events/" + eventId + "/seats", token).status())
+                .isEqualTo(200);
+        assertThat(get("/api/events/" + eventId + "/summary", token).status())
+                .isEqualTo(403);
+        assertThat(get("/api/events/" + eventId + "/bookings", token).status())
+                .isEqualTo(403);
     }
 
     // ---- Existing validation still works behind security ------------------
