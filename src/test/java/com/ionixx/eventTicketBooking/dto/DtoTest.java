@@ -1,4 +1,3 @@
-
 package com.ionixx.eventticketbooking.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -209,6 +208,27 @@ class DtoTest {
         assertThat(response.eventDate()).isEqualTo(date);
         assertThat(response.totalSeats()).isEqualTo(50);
         assertThat(response.basePrice()).isEqualByComparingTo("99.00");
+    }
+
+    @Test
+    void availableEventResponseExposesAllFieldsIncludingSeatRanges() {
+        LocalDate date = LocalDate.now().plusDays(10);
+        List<SeatRange> ranges = List.of(new SeatRange(1, 4), new SeatRange(7, 9));
+        AvailableEventResponse response = new AvailableEventResponse(
+                2, "Concert", "Arena", EventCategory.MUSIC, date,
+                new BigDecimal("500.00"), 9, 7, ranges);
+
+        assertThat(response.id()).isEqualTo(2);
+        assertThat(response.name()).isEqualTo("Concert");
+        assertThat(response.venue()).isEqualTo("Arena");
+        assertThat(response.category()).isEqualTo(EventCategory.MUSIC);
+        assertThat(response.eventDate()).isEqualTo(date);
+        assertThat(response.basePrice()).isEqualByComparingTo("500.00");
+        assertThat(response.totalSeats()).isEqualTo(9);
+        assertThat(response.availableSeats()).isEqualTo(7);
+        assertThat(response.availableSeatRanges()).isEqualTo(ranges);
+        assertThat(ranges.get(0).from()).isEqualTo(1);
+        assertThat(ranges.get(0).to()).isEqualTo(4);
     }
 
     @Test

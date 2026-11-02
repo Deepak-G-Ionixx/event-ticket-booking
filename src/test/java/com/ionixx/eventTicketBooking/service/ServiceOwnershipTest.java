@@ -40,8 +40,8 @@ import com.ionixx.eventticketbooking.repository.BookingRepository;
 import com.ionixx.eventticketbooking.repository.BookingSeatRepository;
 import com.ionixx.eventticketbooking.repository.EventRepository;
 import com.ionixx.eventticketbooking.repository.UserRepository;
-import com.ionixx.eventticketbooking.security.SecurityTestSupport;
 import com.ionixx.eventticketbooking.security.AuthenticatedUserService;
+import com.ionixx.eventticketbooking.security.SecurityTestSupport;
 
 /**
  * Tests who may create and access events and bookings.
@@ -261,7 +261,7 @@ class ServiceOwnershipTest {
     @Test
     void ownerOrganiserCanReadEvent() {
         SecurityTestSupport.actAs(Role.ORGANISER, OWNER_ORGANISER);
-        when(eventRepository.findById(EVENT_ID))
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
                 .thenReturn(Optional.of(eventOwnedBy(OWNER_ORGANISER)));
 
         assertThat(eventService.getEventById(EVENT_ID).id()).isEqualTo(EVENT_ID);
@@ -270,7 +270,7 @@ class ServiceOwnershipTest {
     @Test
     void otherOrganiserCannotReadEvent() {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER);
-        when(eventRepository.findById(EVENT_ID))
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
                 .thenReturn(Optional.of(eventOwnedBy(OWNER_ORGANISER)));
 
         assertThatThrownBy(() -> eventService.getEventById(EVENT_ID))
@@ -280,7 +280,7 @@ class ServiceOwnershipTest {
     @Test
     void customerCanReadAnyEventAndSeatMap() {
         SecurityTestSupport.actAs(Role.CUSTOMER, OWNER_CUSTOMER);
-        when(eventRepository.findById(EVENT_ID))
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
                 .thenReturn(Optional.of(eventOwnedBy(OWNER_ORGANISER)));
         when(bookingSeatRepository.findConfirmedSeatNumbersByEventId(EVENT_ID))
                 .thenReturn(List.of());
@@ -292,7 +292,7 @@ class ServiceOwnershipTest {
     @Test
     void otherOrganiserCannotReadSeatMap() {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER);
-        when(eventRepository.findById(EVENT_ID))
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
                 .thenReturn(Optional.of(eventOwnedBy(OWNER_ORGANISER)));
 
         assertThatThrownBy(() -> bookingService.getEventSeatMap(EVENT_ID))
@@ -304,22 +304,23 @@ class ServiceOwnershipTest {
     @Test
     void ownerQueryIsScopedToTheLoggedInOrganiser() {
         SecurityTestSupport.actAs(Role.ORGANISER, OWNER_ORGANISER);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, OWNER_ORGANISER))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, OWNER_ORGANISER))
                 .thenReturn(Optional.of(eventOwnedBy(OWNER_ORGANISER)));
         when(bookingRepository.summarizeByStatus(EVENT_ID)).thenReturn(List.of());
 
         assertThat(bookingService.getEventSummary(EVENT_ID).eventId()).isEqualTo(EVENT_ID);
 
         // The owner id passed to the query is the logged-in organiser's id.
-        verify(eventRepository).findByIdAndOrganiserId(EVENT_ID, OWNER_ORGANISER);
+        verify(eventRepository)
+                .findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, OWNER_ORGANISER);
     }
 
     @Test
     void otherOrganiserCannotListBookingsOrReadSummary() {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, OTHER_ORGANISER))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, OTHER_ORGANISER))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThatThrownBy(() -> bookingService.getEventBookings(EVENT_ID, null, 0, 10, null))
                 .isInstanceOf(ResourceAccessDeniedException.class);
@@ -336,7 +337,7 @@ class ServiceOwnershipTest {
     @Test
     void customerCannotListBookingsOrReadSummary() {
         SecurityTestSupport.actAs(Role.CUSTOMER, OWNER_CUSTOMER);
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThatThrownBy(() -> bookingService.getEventBookings(EVENT_ID, null, 0, 10, null))
                 .isInstanceOf(ResourceAccessDeniedException.class);
@@ -345,7 +346,8 @@ class ServiceOwnershipTest {
                 .isInstanceOf(ResourceAccessDeniedException.class);
 
         // A customer is never even looked up as an owner.
-        verify(eventRepository, never()).findByIdAndOrganiserId(any(), any());
+        verify(eventRepository, never())
+                .findByIdAndOrganiserIdAndActiveTrue(any(), any());
     }
 
     // ---- Updating and deleting events --------------------------------------
@@ -355,7 +357,7 @@ class ServiceOwnershipTest {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER);
         when(eventRepository.findOwnedByIdForUpdate(EVENT_ID, OTHER_ORGANISER))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThatThrownBy(() -> eventService.updateEvent(EVENT_ID, eventRequest()))
                 .isInstanceOf(ResourceAccessDeniedException.class);

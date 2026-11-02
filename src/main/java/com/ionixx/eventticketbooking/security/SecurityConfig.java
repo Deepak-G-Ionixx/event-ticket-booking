@@ -104,6 +104,11 @@ public class SecurityConfig {
                                 "/api/events/*")
                         .hasRole(Role.ORGANISER.name())
 
+                        // The bookable-event list is for customers. Organisers
+                        // use /api/events/mine for their own events.
+                        .requestMatchers(HttpMethod.GET, "/api/events")
+                        .hasRole(Role.CUSTOMER.name())
+
                         // "My events" belongs to organisers, "my bookings" to customers.
                         .requestMatchers(HttpMethod.GET, "/api/events/mine")
                         .hasRole(Role.ORGANISER.name())

@@ -1,0 +1,58 @@
+databaseChangeLog:
+  - changeSet:
+      id: 012-add-event-active-flag
+      author: eventticketbooking
+      comment: >
+        Soft delete for events. DELETE /api/events/{id} now sets active = false
+        instead of removing the row, so the data stays in the database.
+        Existing rows are active.
+      changes:
+        - addColumn:
+            tableName: event
+            columns:
+              - column:
+                  name: active
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 012-name-date-unique-only-for-active-events
+      author: eventticketbooking
+      comment: >
+        A deleted (inactive) event must not block the organiser from creating
+        a new event with the same name and date. The plain unique constraint is
+        replaced by a partial unique index that only covers active rows.
+        The index keeps the old name, so the duplicate-event error mapping in
+        EventService keeps working unchanged.
+      changes:
+        - dropUniqueConstraint:
+            tableName: event
+            constraintName: uk_event_name_event_date
+        - sql:
+            dbms: postgresql
+            sql: >
+              CREATE UNIQUE INDEX uk_event_name_event_date
+              ON event (name, event_date)
+              WHERE active = TRUE
+      rollback:
+        - sql:
+            dbms: postgresql
+            sql: DROP INDEX IF EXISTS uk_event_name_event_date
+        - addUniqueConstraint:
+            tableName: event
+            columnNames: name, event_date
+            constraintName: uk_event_name_event_date
+
+  - changeSet:
+      id: 012-active-upcoming-events-index
+      author: eventticketbooking
+      comment: Supports the customer "available events" list (active + upcoming, sorted by date).
+      changes:
+        - sql:
+            dbms: postgresql
+            sql: >
+              CREATE INDEX idx_event_active_event_date
+              ON event (event_date)
+              WHERE active = TRUE

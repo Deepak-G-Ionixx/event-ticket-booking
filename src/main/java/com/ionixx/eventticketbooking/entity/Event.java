@@ -18,11 +18,9 @@ import jakarta.persistence.UniqueConstraint;
 @Table(
         name = "event",
         uniqueConstraints = {
-                // Prevent duplicate events with the same name on the same date.
-                @UniqueConstraint(
-                        name = "uk_event_name_event_date",
-                        columnNames = {"name", "event_date"}
-                ),
+                // Name + date uniqueness is enforced by the partial unique index
+                // uk_event_name_event_date (active events only), created in
+                // migration 012. JPA cannot express a partial index here.
 
                 // Ensure every event has a unique event log ID.
                 @UniqueConstraint(
@@ -69,6 +67,11 @@ public class Event {
     // Base ticket price, stored with two decimal places.
     @Column(name = "base_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal basePrice;
+
+    // Soft-delete flag. false means the organiser deleted the event: it is
+    // hidden from every API but the row stays in the database.
+    @Column(nullable = false)
+    private boolean active = true;
 
     // Required by JPA to create entity objects from database records.
     protected Event() {
@@ -185,5 +188,17 @@ public class Event {
     // Returns the base ticket price.
     public BigDecimal getBasePrice() {
         return basePrice;
+    }
+
+    // True while the event is visible; false once it has been deleted.
+    public boolean isActive() {
+        return active;
+    }
+
+    /**
+     * Soft delete: hides the event instead of removing the row.
+     */
+    public void deactivate() {
+        this.active = false;
     }
 }

@@ -463,7 +463,7 @@ class BookingServiceTest {
     void ownerGetsAPageOfBookingsSortedNewestFirstByDefault() {
         SecurityTestSupport.actAs(Role.ORGANISER, ORGANISER_ID);
         Event event = event(50, LocalDate.now().plusDays(5), "100.00");
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.of(event));
         when(bookingRepository.findAllByEvent_Id(eq(EVENT_ID), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(booking(event, "1,2", 2))));
@@ -484,7 +484,7 @@ class BookingServiceTest {
     void ownerCanFilterByStatusAndChooseTheSortOrder() {
         SecurityTestSupport.actAs(Role.ORGANISER, ORGANISER_ID);
         Event event = event(50, LocalDate.now().plusDays(5), "100.00");
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.of(event));
         when(bookingRepository.findAllByEvent_IdAndStatus(
                 eq(EVENT_ID), eq(BookingStatus.CONFIRMED), any(Pageable.class)))
@@ -504,9 +504,9 @@ class BookingServiceTest {
     @Test
     void otherOrganiserIsDeniedBeforeAnyBookingIsRead() {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER_ID);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, OTHER_ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, OTHER_ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThatThrownBy(() -> bookingService.getEventBookings(
                 EVENT_ID, null, 0, 10, null))
@@ -523,9 +523,9 @@ class BookingServiceTest {
     @Test
     void missingEventIsReportedAsNotFound() {
         SecurityTestSupport.actAs(Role.ORGANISER, ORGANISER_ID);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(false);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(false);
 
         assertThatThrownBy(() -> bookingService.getEventBookings(
                 EVENT_ID, null, 0, 10, null))
@@ -535,7 +535,7 @@ class BookingServiceTest {
     @Test
     void invalidPagingForOwnedEventIsRejected() {
         SecurityTestSupport.actAs(Role.ORGANISER, ORGANISER_ID);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.of(event(50, LocalDate.now().plusDays(5), "100.00")));
 
         assertThatThrownBy(() -> bookingService.getEventBookings(
@@ -594,7 +594,7 @@ class BookingServiceTest {
     @Test
     void seatMapListsBookedAndAvailableSeats() {
         SecurityTestSupport.actAs(Role.CUSTOMER, CUSTOMER_ID);
-        when(eventRepository.findById(EVENT_ID))
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
                 .thenReturn(Optional.of(event(10, LocalDate.now().plusDays(5), "100.00")));
         when(bookingSeatRepository.findConfirmedSeatNumbersByEventId(EVENT_ID))
                 .thenReturn(List.of(3, 2));
@@ -609,7 +609,7 @@ class BookingServiceTest {
     @Test
     void seatMapForMissingEventIsNotFound() {
         SecurityTestSupport.actAs(Role.CUSTOMER, CUSTOMER_ID);
-        when(eventRepository.findById(EVENT_ID)).thenReturn(Optional.empty());
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> bookingService.getEventSeatMap(EVENT_ID))
                 .isInstanceOf(EventNotFoundException.class);
@@ -619,7 +619,7 @@ class BookingServiceTest {
 
     private void givenOwnedEvent(Event event) {
         SecurityTestSupport.actAs(Role.ORGANISER, ORGANISER_ID);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.of(event));
     }
 
@@ -687,9 +687,9 @@ class BookingServiceTest {
     @Test
     void summaryOfAnotherOrganisersEventIsDenied() {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER_ID);
-        when(eventRepository.findByIdAndOrganiserId(EVENT_ID, OTHER_ORGANISER_ID))
+        when(eventRepository.findByIdAndOrganiserIdAndActiveTrue(EVENT_ID, OTHER_ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThatThrownBy(() -> bookingService.getEventSummary(EVENT_ID))
                 .isInstanceOf(ResourceAccessDeniedException.class);

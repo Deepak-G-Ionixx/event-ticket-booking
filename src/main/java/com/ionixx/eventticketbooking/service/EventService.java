@@ -1,6 +1,9 @@
 package com.ionixx.eventticketbooking.service;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.hibernate.exception.ConstraintViolationException;
@@ -14,8 +17,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.ionixx.eventticketbooking.security.AuthenticatedUserService;
+import com.ionixx.eventticketbooking.dto.AvailableEventResponse;
 import com.ionixx.eventticketbooking.dto.CreateEventRequest;
 import com.ionixx.eventticketbooking.dto.EventResponse;
+import com.ionixx.eventticketbooking.dto.SeatRange;
 import com.ionixx.eventticketbooking.entity.Event;
 import com.ionixx.eventticketbooking.entity.Role;
 import com.ionixx.eventticketbooking.entity.User;
@@ -87,7 +92,7 @@ public class EventService {
         }
 
         // 2. Check whether an event with the same name and date exists.
-        if (eventRepository.existsByNameAndEventDate(
+        if (eventRepository.existsByNameAndEventDateAndActiveTrue(
                 request.name(),
                 request.eventDate())) {
             throw new DuplicateEventException();
@@ -154,7 +159,8 @@ public class EventService {
 
         UserPrincipal user = CurrentUser.require();
 
-        Event event = eventRepository.findById(id)
+        // Deleted (inactive) events are reported as not found.
+        Event event = eventRepository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new EventNotFoundException(id));
 
         // Customers can browse any event; an organiser can open only their own.
@@ -191,7 +197,7 @@ public class EventService {
             );
         }
 
-        if (eventRepository.existsByNameAndEventDateAndIdNot(
+        if (eventRepository.existsByNameAndEventDateAndIdNotAndActiveTrue(
                 request.name(),
                 request.eventDate(),
                 id)) {
@@ -229,11 +235,16 @@ public class EventService {
     }
 
     /**
-     * Deletes an event that has no bookings.
+     * Soft-deletes an event that has no bookings.
      * Only the organiser who owns the event may do this.
      *
+     * The row is NOT removed from the database: it is marked active = false.
+     * From then on every endpoint treats the event as missing (404), it no
+     * longer appears in "my events" or in the customer event list, and the
+     * same name and date can be used for a new event.
+     *
      * The event row is locked first, so no booking can be created between
-     * the "has bookings" check and the delete.
+     * the "has bookings" check and the deactivation.
      */
     @Transactional
     public void deleteEvent(Integer id) {
@@ -251,8 +262,11 @@ public class EventService {
             throw new EventHasBookingsException(id);
         }
 
-        eventRepository.delete(event);
-        eventRepository.flush();
+        event.deactivate();
+        eventRepository.saveAndFlush(event);
+
+        log.info("Event soft-deleted: eventLogId={}, eventId={}",
+                event.getEventLogId(), event.getId());
     }
 
     /**
@@ -275,8 +289,113 @@ public class EventService {
 
         // The organiser id comes from the JWT, never from the request.
         return eventRepository
-                .findAllByOrganiserId(user.id(), pageable)
+                .findAllByOrganiserIdAndActiveTrue(user.id(), pageable)
                 .map(this::toResponse);
+    }
+
+    /**
+     * Events a customer can book: active events dated today or later,
+     * soonest first, with the number of seats still free and which seat
+     * numbers those are.
+     *
+     * @param sort optional, for example "basePrice,asc" or "name,asc"
+     */
+    @Transactional(readOnly = true)
+    public Page<AvailableEventResponse> getAvailableEvents(
+            int page, int size, String sort) {
+
+        Pageable pageable = PagingSupport.pageRequest(
+                page,
+                size,
+                sort,
+                EVENT_SORT_PROPERTIES,
+                DEFAULT_EVENT_SORT,
+                EVENT_TIE_BREAKER);
+
+        Page<Event> events = eventRepository
+                .findAllByActiveTrueAndEventDateGreaterThanEqual(
+                        LocalDate.now(), pageable);
+
+        // One query for the whole page instead of one per event.
+        Map<Integer, List<Integer>> bookedSeatsByEvent = new HashMap<>();
+
+        List<Integer> eventIds = events.getContent().stream()
+                .map(Event::getId)
+                .toList();
+
+        if (!eventIds.isEmpty()) {
+            for (Object[] row
+                    : eventRepository.findConfirmedSeatNumbersByEventIds(
+                    eventIds)) {
+                bookedSeatsByEvent
+                        .computeIfAbsent(
+                                (Integer) row[0], id -> new ArrayList<>())
+                        .add(((Number) row[1]).intValue());
+            }
+        }
+
+        return events.map(event -> toAvailableResponse(
+                event,
+                bookedSeatsByEvent.getOrDefault(event.getId(), List.of())));
+    }
+
+    private AvailableEventResponse toAvailableResponse(
+            Event event, List<Integer> bookedSeats) {
+
+        List<SeatRange> freeRanges =
+                toAvailableRanges(event.getTotalSeats(), bookedSeats);
+
+        // The count comes from the same ranges, so the two can never disagree.
+        int availableSeats = freeRanges.stream()
+                .mapToInt(range -> range.to() - range.from() + 1)
+                .sum();
+
+        return new AvailableEventResponse(
+                event.getId(),
+                event.getName(),
+                event.getVenue(),
+                event.getCategory(),
+                event.getEventDate(),
+                event.getBasePrice(),
+                event.getTotalSeats(),
+                availableSeats,
+                freeRanges
+        );
+    }
+
+    /**
+     * Turns the booked seat numbers into the ranges that are still free.
+     *
+     * Seats are numbered 1..totalSeats. For 10 seats with seats 3, 4 and 8
+     * booked the result is [1-2], [5-7], [9-10].
+     *
+     * @param bookedSeatsAscending booked seat numbers, smallest first
+     */
+    static List<SeatRange> toAvailableRanges(
+            int totalSeats, List<Integer> bookedSeatsAscending) {
+
+        List<SeatRange> ranges = new ArrayList<>();
+        int nextFree = 1;
+
+        for (int booked : bookedSeatsAscending) {
+
+            // Ignore anything outside the hall (should not happen).
+            if (booked > totalSeats) {
+                break;
+            }
+
+            if (booked > nextFree) {
+                ranges.add(new SeatRange(nextFree, booked - 1));
+            }
+
+            nextFree = Math.max(nextFree, booked + 1);
+        }
+
+        if (nextFree <= totalSeats) {
+            ranges.add(new SeatRange(nextFree, totalSeats));
+        }
+
+        return ranges;
     }
 
     private EventResponse toResponse(Event event) {
