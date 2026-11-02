@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.slf4j.MDC;
 import org.springframework.data.domain.Page;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,11 +16,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import com.ionixx.eventticketbooking.dto.AvailableEventResponse;
 import com.ionixx.eventticketbooking.dto.BookingResponse;
 import com.ionixx.eventticketbooking.dto.CreateEventRequest;
 import com.ionixx.eventticketbooking.dto.EventResponse;
 import com.ionixx.eventticketbooking.dto.EventSeatMapResponse;
 import com.ionixx.eventticketbooking.dto.EventSummaryResponse;
+import com.ionixx.eventticketbooking.dto.MessageResponse;
 import com.ionixx.eventticketbooking.entity.BookingStatus;
 import com.ionixx.eventticketbooking.exception.InvalidEventIdException;
 import com.ionixx.eventticketbooking.service.BookingService;
@@ -66,6 +67,22 @@ public class EventController {
                 .body(response);
     }
 
+    // GET /api/events?page=0&size=10&sort=eventDate,asc
+    // For customers, before booking: every event that can still be booked
+    // (not deleted, dated today or later), soonest first, with name, venue,
+    // category, date, price, the number of free seats and the free seat
+    // numbers as ranges (availableSeatRanges). Use the returned id as
+    // eventId in POST /api/bookings.
+    @GetMapping
+    public ResponseEntity<Page<AvailableEventResponse>> getAvailableEvents(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String sort) {
+
+        return ResponseEntity.ok(
+                eventService.getAvailableEvents(page, size, sort));
+    }
+
     // GET /api/events/mine?page=0&size=10&sort=eventDate,asc
     // Only the logged-in organiser's own events. The literal path "mine"
     // is matched before the "/{id}" pattern below.
@@ -91,13 +108,16 @@ public class EventController {
 
     // DELETE /api/events/{id}
     // Only the organiser who owns the event may delete it, and only while
-    // it has no bookings.
+    // it has no bookings. This is a soft delete: the row stays in the
+    // database with active = false, but the event disappears from the API.
+    // Responds 200 with {"message": "Event deleted successfully"}.
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteEvent(@PathVariable String id) {
+    public ResponseEntity<MessageResponse> deleteEvent(@PathVariable String id) {
 
         eventService.deleteEvent(parseEventId(id));
 
-        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        return ResponseEntity.ok(
+                new MessageResponse("Event deleted successfully"));
     }
 
     // GET /api/events/{id}

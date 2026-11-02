@@ -18,7 +18,7 @@ import com.ionixx.eventticketbooking.security.UserPrincipal;
  * check later cannot leak another organiser's event.
  *
  * Policy for inaccessible resources:
- * the event does not exist -> 404 EVENT_NOT_FOUND,
+ * the event does not exist or was deleted -> 404 EVENT_NOT_FOUND,
  * the event exists but belongs to someone else -> 403 RESOURCE_ACCESS_DENIED.
  */
 final class OwnedEvents {
@@ -44,7 +44,7 @@ final class OwnedEvents {
             }
         }
 
-        if (eventRepository.existsById(eventId)) {
+        if (eventRepository.existsByIdAndActiveTrue(eventId)) {
             throw new ResourceAccessDeniedException();
         }
 

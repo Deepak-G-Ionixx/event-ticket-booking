@@ -196,9 +196,100 @@ class SecurityIsolationIntegrationTest extends AbstractIntegrationTest {
         assertThat(eventRepository.findById(eventId).orElseThrow().getOrganiserId())
                 .isEqualTo(a.id());
 
-        assertThat(call(HttpMethod.DELETE, path, a.token(), null).status())
-                .isEqualTo(204);
-        assertThat(eventRepository.findById(eventId)).isEmpty();
+        ApiResult delete = call(HttpMethod.DELETE, path, a.token(), null);
+        assertThat(delete.status()).isEqualTo(200);
+        assertThat(delete.body().path("message").asText())
+                .isEqualTo("Event deleted successfully");
+
+        // Soft delete: the row is still in the database, only marked inactive.
+        Event deleted = eventRepository.findById(eventId).orElseThrow();
+        assertThat(deleted.isActive()).isFalse();
+        assertThat(deleted.getName()).isEqualTo(newName);
+
+        // ...but for the API it is gone.
+        assertThat(get(path, a.token()).status()).isEqualTo(404);
+        assertThat(call(HttpMethod.DELETE, path, a.token(), null).status()).isEqualTo(404);
+        assertThat(call(HttpMethod.PUT, path, a.token(),
+                eventBody("Again " + UUID.randomUUID(), 30)).status()).isEqualTo(404);
+        assertThat(ids(get("/api/events/mine?size=100", a.token()).body()))
+                .doesNotContain(eventId);
+    }
+
+    @Test
+    void deletedEventIsHiddenFromCustomersAndCannotBeBooked() {
+        Account organiser = account(Role.ORGANISER);
+        Account customer = account(Role.CUSTOMER);
+        int eventId = createEvent(organiser);
+        String path = "/api/events/" + eventId;
+
+        assertThat(ids(get("/api/events?size=100&sort=id,desc", customer.token()).body()))
+                .contains(eventId);
+
+        assertThat(call(HttpMethod.DELETE, path, organiser.token(), null).status())
+                .isEqualTo(200);
+
+        assertThat(ids(get("/api/events?size=100&sort=id,desc", customer.token()).body()))
+                .doesNotContain(eventId);
+        assertThat(get(path, customer.token()).status()).isEqualTo(404);
+        assertThat(get(path + "/seats", customer.token()).status()).isEqualTo(404);
+        assertThat(book(customer, eventId, customer.email(), List.of(1)).status())
+                .isEqualTo(404);
+    }
+
+    @Test
+    void deletedEventDoesNotBlockReusingItsNameAndDate() {
+        Account organiser = account(Role.ORGANISER);
+        String name = "Reused Name " + UUID.randomUUID();
+
+        ApiResult first = post("/api/events", organiser.token(), eventBody(name, 20));
+        assertThat(first.status()).isEqualTo(201);
+        int firstId = first.body().path("id").asInt();
+
+        // While the first event is active, the same name and date is a duplicate.
+        assertThat(post("/api/events", organiser.token(), eventBody(name, 20)).status())
+                .isEqualTo(409);
+
+        assertThat(call(HttpMethod.DELETE, "/api/events/" + firstId,
+                organiser.token(), null).status()).isEqualTo(200);
+
+        ApiResult second = post("/api/events", organiser.token(), eventBody(name, 20));
+        assertThat(second.status()).isEqualTo(201);
+        assertThat(second.body().path("id").asInt()).isNotEqualTo(firstId);
+
+        // Both rows exist; only the new one is active.
+        assertThat(eventRepository.findById(firstId).orElseThrow().isActive()).isFalse();
+    }
+
+    @Test
+    void customersSeeBookableEventsWithFreeSeats() {
+        Account organiser = account(Role.ORGANISER);
+        Account customer = account(Role.CUSTOMER);
+        int eventId = createEvent(organiser);
+
+        assertThat(book(customer, eventId, customer.email(), List.of(1, 2)).status())
+                .isEqualTo(201);
+
+        ApiResult list = get("/api/events?size=100&sort=id,desc", customer.token());
+        assertThat(list.status()).isEqualTo(200);
+
+        JsonNode event = null;
+        for (JsonNode node : list.body().path("content")) {
+            if (node.path("id").asInt() == eventId) {
+                event = node;
+            }
+        }
+
+        assertThat(event).isNotNull();
+        assertThat(event.path("name").asText()).startsWith("Isolation Event ");
+        assertThat(event.path("venue").asText()).isEqualTo("Chennai Test Hall");
+        assertThat(event.path("category").asText()).isEqualTo("TECH");
+        assertThat(event.path("eventDate").asText())
+                .isEqualTo(LocalDate.now().plusDays(60).toString());
+        assertThat(event.path("totalSeats").asInt()).isEqualTo(20);
+        assertThat(event.path("availableSeats").asInt()).isEqualTo(18);
+
+        // Organisers use /api/events/mine instead.
+        assertThat(get("/api/events", organiser.token()).status()).isEqualTo(403);
     }
 
     @Test

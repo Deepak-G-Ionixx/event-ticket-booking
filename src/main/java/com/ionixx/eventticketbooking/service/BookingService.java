@@ -235,7 +235,7 @@ public class BookingService {
         OwnedEvents.require(
                 user,
                 eventId,
-                organiserId -> eventRepository.findByIdAndOrganiserId(
+                organiserId -> eventRepository.findByIdAndOrganiserIdAndActiveTrue(
                         eventId, organiserId),
                 eventRepository);
 
@@ -284,7 +284,7 @@ public class BookingService {
 
         UserPrincipal user = CurrentUser.require();
 
-        Event event = eventRepository.findById(eventId)
+        Event event = eventRepository.findByIdAndActiveTrue(eventId)
                 .orElseThrow(() -> new EventNotFoundException(eventId));
 
         // Enforce the existing event visibility rules.
@@ -328,7 +328,7 @@ public class BookingService {
         Event event = OwnedEvents.require(
                 user,
                 eventId,
-                organiserId -> eventRepository.findByIdAndOrganiserId(
+                organiserId -> eventRepository.findByIdAndOrganiserIdAndActiveTrue(
                         eventId, organiserId),
                 eventRepository);
 

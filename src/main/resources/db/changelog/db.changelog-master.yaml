@@ -36,3 +36,6 @@ databaseChangeLog:
 
   - include:
       file: db/changelog/changes/011-booking-seat-event-consistency.yaml
+
+  - include:
+      file: db/changelog/changes/012-add-event-active-flag.yaml

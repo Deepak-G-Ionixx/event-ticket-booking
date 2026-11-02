@@ -12,12 +12,26 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import com.ionixx.eventticketbooking.dto.AvailableEventResponse;
+import com.ionixx.eventticketbooking.dto.CreateEventRequest;
+import com.ionixx.eventticketbooking.dto.EventResponse;
+import com.ionixx.eventticketbooking.dto.SeatRange;
+import com.ionixx.eventticketbooking.entity.Event;
+import com.ionixx.eventticketbooking.entity.EventCategory;
+import com.ionixx.eventticketbooking.entity.Role;
+import com.ionixx.eventticketbooking.entity.User;
+import com.ionixx.eventticketbooking.exception.DuplicateEventException;
+import com.ionixx.eventticketbooking.exception.EventHasBookingsException;
+import com.ionixx.eventticketbooking.exception.EventNotFoundException;
+import com.ionixx.eventticketbooking.exception.ResourceAccessDeniedException;
+import com.ionixx.eventticketbooking.repository.EventRepository;
 import com.ionixx.eventticketbooking.security.AuthenticatedUserService;
+import com.ionixx.eventticketbooking.security.SecurityTestSupport;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,19 +49,6 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import com.ionixx.eventticketbooking.dto.CreateEventRequest;
-import com.ionixx.eventticketbooking.dto.EventResponse;
-import com.ionixx.eventticketbooking.entity.Event;
-import com.ionixx.eventticketbooking.entity.EventCategory;
-import com.ionixx.eventticketbooking.entity.Role;
-import com.ionixx.eventticketbooking.entity.User;
-import com.ionixx.eventticketbooking.exception.DuplicateEventException;
-import com.ionixx.eventticketbooking.exception.EventHasBookingsException;
-import com.ionixx.eventticketbooking.exception.EventNotFoundException;
-import com.ionixx.eventticketbooking.exception.ResourceAccessDeniedException;
-import com.ionixx.eventticketbooking.repository.EventRepository;
-import com.ionixx.eventticketbooking.security.SecurityTestSupport;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -140,7 +141,8 @@ class EventServiceTest {
         LocalDate date = LocalDate.now().plusDays(30);
         CreateEventRequest request = requestFor(date);
 
-        when(eventRepository.existsByNameAndEventDate("Java Conference", date)).thenReturn(false);
+        when(eventRepository.existsByNameAndEventDateAndActiveTrue("Java Conference", date))
+                .thenReturn(false);
         saveAssignsId(1);
 
         EventResponse response = eventService.createEvent(request);
@@ -178,7 +180,8 @@ class EventServiceTest {
     @Test
     void createEventRejectsDuplicateNameAndDate() {
         LocalDate date = LocalDate.now().plusDays(30);
-        when(eventRepository.existsByNameAndEventDate("Java Conference", date)).thenReturn(true);
+        when(eventRepository.existsByNameAndEventDateAndActiveTrue("Java Conference", date))
+                .thenReturn(true);
 
         assertThrows(DuplicateEventException.class,
                 () -> eventService.createEvent(requestFor(date)));
@@ -191,7 +194,8 @@ class EventServiceTest {
                 () -> eventService.createEvent(requestFor(null)));
 
         assertEquals("Event date must be in the future", ex.getMessage());
-        verify(eventRepository, never()).existsByNameAndEventDate(any(), any());
+        verify(eventRepository, never())
+                .existsByNameAndEventDateAndActiveTrue(any(), any());
     }
 
     @Test
@@ -241,7 +245,8 @@ class EventServiceTest {
 
     @Test
     void createEventRethrowsOtherConstraintViolations() {
-        DataIntegrityViolationException original = constraintViolation("uk_event_event_log_id");
+        DataIntegrityViolationException original =
+                constraintViolation("uk_event_event_log_id");
         when(eventRepository.saveAndFlush(any(Event.class))).thenThrow(original);
 
         DataIntegrityViolationException thrown = assertThrows(
@@ -282,7 +287,8 @@ class EventServiceTest {
 
     @Test
     void getEventByIdReturnsMappedEvent() {
-        when(eventRepository.findById(EVENT_ID)).thenReturn(Optional.of(existingEvent()));
+        when(eventRepository.findByIdAndActiveTrue(EVENT_ID))
+                .thenReturn(Optional.of(existingEvent()));
 
         EventResponse response = eventService.getEventById(EVENT_ID);
 
@@ -297,7 +303,7 @@ class EventServiceTest {
 
     @Test
     void getEventByIdThrowsWhenEventDoesNotExist() {
-        when(eventRepository.findById(404)).thenReturn(Optional.empty());
+        when(eventRepository.findByIdAndActiveTrue(404)).thenReturn(Optional.empty());
 
         assertThrows(EventNotFoundException.class, () -> eventService.getEventById(404));
     }
@@ -341,7 +347,7 @@ class EventServiceTest {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER_ID);
         when(eventRepository.findOwnedByIdForUpdate(EVENT_ID, OTHER_ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThrows(ResourceAccessDeniedException.class,
                 () -> eventService.updateEvent(EVENT_ID, requestFor(LocalDate.now().plusDays(40))));
@@ -352,7 +358,7 @@ class EventServiceTest {
     void updateOfMissingEventIsNotFound() {
         when(eventRepository.findOwnedByIdForUpdate(EVENT_ID, ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(false);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(false);
 
         assertThrows(EventNotFoundException.class,
                 () -> eventService.updateEvent(EVENT_ID, requestFor(LocalDate.now().plusDays(40))));
@@ -361,7 +367,7 @@ class EventServiceTest {
     @Test
     void customerCannotUpdateAnEvent() {
         SecurityTestSupport.actAs(Role.CUSTOMER, 30);
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThrows(ResourceAccessDeniedException.class,
                 () -> eventService.updateEvent(EVENT_ID, requestFor(LocalDate.now().plusDays(40))));
@@ -386,7 +392,8 @@ class EventServiceTest {
     void updateRejectsANameAndDateUsedByAnotherEvent() {
         givenOwnedEventLockedForUpdate(existingEvent());
         LocalDate date = LocalDate.now().plusDays(40);
-        when(eventRepository.existsByNameAndEventDateAndIdNot("Java Conference", date, EVENT_ID))
+        when(eventRepository.existsByNameAndEventDateAndIdNotAndActiveTrue(
+                "Java Conference", date, EVENT_ID))
                 .thenReturn(true);
 
         assertThrows(DuplicateEventException.class,
@@ -424,7 +431,8 @@ class EventServiceTest {
         Event event = existingEvent();
         givenOwnedEventLockedForUpdate(event);
         when(eventRepository.findHighestReservedSeat(EVENT_ID)).thenReturn(0);
-        DataIntegrityViolationException original = constraintViolation("ck_event_total_seats");
+        DataIntegrityViolationException original =
+                constraintViolation("ck_event_total_seats");
         when(eventRepository.saveAndFlush(event)).thenThrow(original);
 
         DataIntegrityViolationException thrown = assertThrows(
@@ -446,8 +454,183 @@ class EventServiceTest {
 
         eventService.deleteEvent(EVENT_ID);
 
-        verify(eventRepository).delete(event);
-        verify(eventRepository).flush();
+        // Soft delete: the row is kept and only marked inactive.
+        assertThat(event.isActive()).isFalse();
+        verify(eventRepository).saveAndFlush(event);
+        verify(eventRepository, never()).delete(any(Event.class));
+    }
+
+    @Test
+    void newEventsAreActive() {
+        assertThat(existingEvent().isActive()).isTrue();
+    }
+
+    @Test
+    void alreadyDeletedEventIsReportedAsNotFound() {
+        when(eventRepository.findOwnedByIdForUpdate(EVENT_ID, ORGANISER_ID))
+                .thenReturn(Optional.empty());
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(false);
+
+        assertThrows(EventNotFoundException.class, () -> eventService.deleteEvent(EVENT_ID));
+        verify(eventRepository, never()).saveAndFlush(any(Event.class));
+    }
+
+    // ------------------------------------------------------------------
+    // getAvailableEvents (customer event list)
+    // ------------------------------------------------------------------
+
+    @Test
+    void availableEventsShowFreeSeatsAndOnlyAskForActiveUpcomingEvents() {
+        Event event = existingEvent();
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(event)));
+        when(eventRepository.findConfirmedSeatNumbersByEventIds(List.of(EVENT_ID)))
+                .thenReturn(List.<Object[]>of(
+                        new Object[] {EVENT_ID, 1},
+                        new Object[] {EVENT_ID, 2},
+                        new Object[] {EVENT_ID, 50}));
+
+        Page<AvailableEventResponse> page = eventService.getAvailableEvents(0, 10, null);
+
+        AvailableEventResponse only = page.getContent().get(0);
+        assertThat(only.id()).isEqualTo(EVENT_ID);
+        assertThat(only.name()).isEqualTo(event.getName());
+        assertThat(only.venue()).isEqualTo(event.getVenue());
+        assertThat(only.eventDate()).isEqualTo(event.getEventDate());
+        assertThat(only.availableSeats()).isEqualTo(event.getTotalSeats() - 3);
+        assertThat(only.availableSeatRanges()).containsExactly(
+                new SeatRange(3, 49), new SeatRange(51, 100));
+    }
+
+    @Test
+    void availableEventsWithoutBookingsAreFullyFree() {
+        Event event = existingEvent();
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(event)));
+        when(eventRepository.findConfirmedSeatNumbersByEventIds(List.of(EVENT_ID)))
+                .thenReturn(List.of());
+
+        AvailableEventResponse only =
+                eventService.getAvailableEvents(0, 10, null).getContent().get(0);
+
+        assertThat(only.availableSeats()).isEqualTo(event.getTotalSeats());
+        assertThat(only.availableSeatRanges())
+                .containsExactly(new SeatRange(1, event.getTotalSeats()));
+    }
+
+    @Test
+    void soldOutEventHasNoFreeSeatsAndNoRanges() {
+        Event event = existingEvent();
+        List<Object[]> everySeat = new java.util.ArrayList<>();
+        for (int seat = 1; seat <= event.getTotalSeats(); seat++) {
+            everySeat.add(new Object[] {EVENT_ID, seat});
+        }
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(event)));
+        when(eventRepository.findConfirmedSeatNumbersByEventIds(List.of(EVENT_ID)))
+                .thenReturn(everySeat);
+
+        AvailableEventResponse only =
+                eventService.getAvailableEvents(0, 10, null).getContent().get(0);
+
+        assertThat(only.availableSeats()).isZero();
+        assertThat(only.availableSeatRanges()).isEmpty();
+    }
+
+    @Test
+    void bookedSeatsAreMatchedToTheirOwnEvent() {
+        Event first = existingEvent();
+        Event second = existingEvent();
+        ReflectionTestUtils.setField(second, "id", EVENT_ID + 1);
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(first, second)));
+        when(eventRepository.findConfirmedSeatNumbersByEventIds(
+                List.of(EVENT_ID, EVENT_ID + 1)))
+                .thenReturn(List.<Object[]>of(
+                        new Object[] {EVENT_ID, 1},
+                        new Object[] {EVENT_ID + 1, 5L},
+                        new Object[] {EVENT_ID + 1, 6L}));
+
+        List<AvailableEventResponse> content =
+                eventService.getAvailableEvents(0, 10, null).getContent();
+
+        assertThat(content.get(0).availableSeats()).isEqualTo(99);
+        assertThat(content.get(1).availableSeats()).isEqualTo(98);
+        assertThat(content.get(1).availableSeatRanges()).containsExactly(
+                new SeatRange(1, 4), new SeatRange(7, 100));
+    }
+
+    @Test
+    void emptyAvailableEventPageSkipsTheSeatQuery() {
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        assertThat(eventService.getAvailableEvents(0, 10, null)).isEmpty();
+        verify(eventRepository, never()).findConfirmedSeatNumbersByEventIds(any());
+    }
+
+    @Test
+    void availableEventsAreSortedSoonestFirstByDefault() {
+        when(eventRepository.findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        eventService.getAvailableEvents(2, 5, null);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(eventRepository).findAllByActiveTrueAndEventDateGreaterThanEqual(
+                eq(LocalDate.now()), captor.capture());
+        assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(captor.getValue().getPageSize()).isEqualTo(5);
+        assertThat(captor.getValue().getSort()).isEqualTo(Sort.by(
+                Sort.Order.asc("eventDate"), Sort.Order.asc("id")));
+    }
+
+    @Test
+    void invalidPagingForAvailableEventsIsRejectedBeforeQuerying() {
+        assertThrows(IllegalArgumentException.class,
+                () -> eventService.getAvailableEvents(-1, 10, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> eventService.getAvailableEvents(0, 0, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> eventService.getAvailableEvents(0, 101, null));
+        verify(eventRepository, never())
+                .findAllByActiveTrueAndEventDateGreaterThanEqual(any(), any());
+    }
+
+    // ------------------------------------------------------------------
+    // toAvailableRanges (which seats are still free)
+    // ------------------------------------------------------------------
+
+    @Test
+    void rangesSplitAroundBookedSeats() {
+        assertThat(EventService.toAvailableRanges(10, List.of(3, 4, 8)))
+                .containsExactly(
+                        new SeatRange(1, 2),
+                        new SeatRange(5, 7),
+                        new SeatRange(9, 10));
+    }
+
+    @Test
+    void rangesHandleBookedSeatsAtBothEnds() {
+        assertThat(EventService.toAvailableRanges(10, List.of(1, 2, 10)))
+                .containsExactly(new SeatRange(3, 9));
+    }
+
+    @Test
+    void rangesAreEmptyWhenEverySeatIsBooked() {
+        assertThat(EventService.toAvailableRanges(3, List.of(1, 2, 3))).isEmpty();
+    }
+
+    @Test
+    void rangesIgnoreSeatsOutsideTheHallAndRepeatedSeats() {
+        assertThat(EventService.toAvailableRanges(5, List.of(2, 2, 9)))
+                .containsExactly(new SeatRange(1, 1), new SeatRange(3, 5));
     }
 
     @Test
@@ -457,6 +640,7 @@ class EventServiceTest {
 
         assertThrows(EventHasBookingsException.class, () -> eventService.deleteEvent(EVENT_ID));
         verify(eventRepository, never()).delete(any(Event.class));
+        verify(eventRepository, never()).saveAndFlush(any(Event.class));
     }
 
     @Test
@@ -464,10 +648,11 @@ class EventServiceTest {
         SecurityTestSupport.actAs(Role.ORGANISER, OTHER_ORGANISER_ID);
         when(eventRepository.findOwnedByIdForUpdate(EVENT_ID, OTHER_ORGANISER_ID))
                 .thenReturn(Optional.empty());
-        when(eventRepository.existsById(EVENT_ID)).thenReturn(true);
+        when(eventRepository.existsByIdAndActiveTrue(EVENT_ID)).thenReturn(true);
 
         assertThrows(ResourceAccessDeniedException.class, () -> eventService.deleteEvent(EVENT_ID));
         verify(eventRepository, never()).delete(any(Event.class));
+        verify(eventRepository, never()).saveAndFlush(any(Event.class));
     }
 
     // ------------------------------------------------------------------
@@ -476,7 +661,8 @@ class EventServiceTest {
 
     @Test
     void myEventsUsesTheAuthenticatedOrganiserAndDefaultSort() {
-        when(eventRepository.findAllByOrganiserId(eq(ORGANISER_ID), any(Pageable.class)))
+        when(eventRepository.findAllByOrganiserIdAndActiveTrue(
+                eq(ORGANISER_ID), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(existingEvent())));
 
         Page<EventResponse> page = eventService.getMyEvents(0, 10, null);
@@ -484,20 +670,23 @@ class EventServiceTest {
         assertThat(page.getContent()).extracting(EventResponse::id).containsExactly(EVENT_ID);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(eventRepository).findAllByOrganiserId(eq(ORGANISER_ID), pageable.capture());
+        verify(eventRepository).findAllByOrganiserIdAndActiveTrue(
+                eq(ORGANISER_ID), pageable.capture());
         assertThat(pageable.getValue().getSort()).isEqualTo(
                 Sort.by(Sort.Order.asc("eventDate"), Sort.Order.asc("id")));
     }
 
     @Test
     void myEventsAcceptsAWhitelistedSort() {
-        when(eventRepository.findAllByOrganiserId(eq(ORGANISER_ID), any(Pageable.class)))
+        when(eventRepository.findAllByOrganiserIdAndActiveTrue(
+                eq(ORGANISER_ID), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
         eventService.getMyEvents(1, 5, "name,desc");
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(eventRepository).findAllByOrganiserId(eq(ORGANISER_ID), pageable.capture());
+        verify(eventRepository).findAllByOrganiserIdAndActiveTrue(
+                eq(ORGANISER_ID), pageable.capture());
         assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
         assertThat(pageable.getValue().getSort()).isEqualTo(
                 Sort.by(Sort.Order.desc("name"), Sort.Order.asc("id")));
@@ -514,6 +703,7 @@ class EventServiceTest {
         assertThatThrownBy(() -> eventService.getMyEvents(0, 10, "organiserId"))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        verify(eventRepository, never()).findAllByOrganiserId(any(), any(Pageable.class));
+        verify(eventRepository, never())
+                .findAllByOrganiserIdAndActiveTrue(any(), any(Pageable.class));
     }
 }
